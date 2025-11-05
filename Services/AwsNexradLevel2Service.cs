@@ -3,17 +3,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Xml.Linq;
 using OhioNewsWeather.WeatherApp.Models;
 
 namespace OhioNewsWeather.WeatherApp.Services
 {
     /// <summary>
-    /// Service for accessing and processing NEXRAD Level 2 data from AWS S3
+    /// Service for accessing and processing NEXRAD Level 2 data from NOAA NOMADS NCEP server
     /// Downloads raw Level 2 files, parses binary data, and renders professional-grade radar imagery
     /// </summary>
     public class AwsNexradLevel2Service : IRadarService
@@ -21,7 +20,9 @@ namespace OhioNewsWeather.WeatherApp.Services
         private readonly HttpClient _httpClient;
         private readonly IRadarSiteService _radarSiteService;
         private readonly Level2Parser _parser;
-        private const string AWS_NEXRAD_BUCKET = "https://noaa-nexrad-level2.s3.amazonaws.com";
+
+        // NOAA NOMADS NCEP real-time Level 2 radar data
+        private const string NOMADS_BASE_URL = "https://nomads.ncep.noaa.gov/pub/data/nccf/radar/nexrad_level2";
 
         public AwsNexradLevel2Service(IHttpClientFactory httpClientFactory, IRadarSiteService radarSiteService)
         {
@@ -35,7 +36,7 @@ namespace OhioNewsWeather.WeatherApp.Services
         {
             var frames = new List<RadarFrame>();
 
-            System.Diagnostics.Debug.WriteLine($"Fetching {frameCount} Level 2 files from AWS S3 for {site.SiteId}");
+            System.Diagnostics.Debug.WriteLine($"Fetching {frameCount} Level 2 files from NOMADS NCEP for {site.SiteId}");
 
             try
             {
@@ -50,7 +51,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                 System.Diagnostics.Debug.WriteLine($"Found {files.Count} Level 2 files");
 
-                // Process each file
+                // Process each file (most recent first)
                 foreach (var fileInfo in files.Take(frameCount))
                 {
                     try
@@ -64,7 +65,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"Error processing file {fileInfo.Key}: {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine($"Error processing file {fileInfo.FileName}: {ex.Message}");
                     }
                 }
 
@@ -91,73 +92,60 @@ namespace OhioNewsWeather.WeatherApp.Services
         }
 
         /// <summary>
-        /// List Level 2 files from AWS S3 bucket
+        /// List Level 2 files from NOMADS NCEP server by parsing directory listing
         /// </summary>
         private async Task<List<Level2FileInfo>> ListLevel2FilesAsync(string siteId, int maxFiles = 10)
         {
             try
             {
-                var now = DateTime.UtcNow;
                 var files = new List<Level2FileInfo>();
 
-                // Try today and yesterday
-                for (int dayOffset = 0; dayOffset <= 1 && files.Count < maxFiles; dayOffset++)
+                // NOMADS directory structure: /SITE/ (e.g., /KCLE/)
+                var directoryUrl = $"{NOMADS_BASE_URL}/{siteId}/";
+
+                System.Diagnostics.Debug.WriteLine($"Listing NOMADS files: {directoryUrl}");
+
+                try
                 {
-                    var date = now.AddDays(-dayOffset);
-                    var year = date.Year;
-                    var month = date.Month.ToString("D2");
-                    var day = date.Day.ToString("D2");
+                    var html = await _httpClient.GetStringAsync(directoryUrl);
 
-                    // AWS S3 bucket structure: YYYY/MM/DD/SITE/
-                    var prefix = $"{year}/{month}/{day}/{siteId}/";
-                    var listUrl = $"{AWS_NEXRAD_BUCKET}?list-type=2&prefix={prefix}&max-keys=50";
+                    // Parse HTML directory listing
+                    // Look for links like: KCLE_20251105_092830.bz2
+                    var pattern = $@"{siteId}_(\d{{8}})_(\d{{6}})\.bz2";
+                    var regex = new Regex(pattern, RegexOptions.IgnoreCase);
 
-                    System.Diagnostics.Debug.WriteLine($"Listing S3 files: {listUrl}");
+                    var matches = regex.Matches(html);
 
-                    try
+                    foreach (Match match in matches)
                     {
-                        var response = await _httpClient.GetStringAsync(listUrl);
-
-                        // Parse XML response
-                        var xml = XDocument.Parse(response);
-                        XNamespace ns = "http://s3.amazonaws.com/doc/2006-03-01/";
-
-                        var contents = xml.Descendants(ns + "Contents");
-
-                        foreach (var content in contents)
+                        if (match.Success && match.Groups.Count >= 3)
                         {
-                            var key = content.Element(ns + "Key")?.Value;
-                            var lastModified = content.Element(ns + "LastModified")?.Value;
-                            var size = content.Element(ns + "Size")?.Value;
+                            var fileName = match.Value;
+                            var datePart = match.Groups[1].Value; // YYYYMMDD
+                            var timePart = match.Groups[2].Value; // HHMMSS
 
-                            if (string.IsNullOrEmpty(key) || !key.Contains(siteId))
-                                continue;
-
-                            // Parse filename to get timestamp
-                            // Format: SITE_YYYYMMDD_HHMMSS_V06 or SITE_YYYYMMDD_HHMMSS_V08
-                            var fileName = Path.GetFileName(key);
-                            var timestamp = ParseTimestampFromFileName(fileName);
-
-                            if (timestamp.HasValue && long.TryParse(size, out long fileSize) && fileSize > 1000)
+                            var timestamp = ParseTimestamp(datePart, timePart);
+                            if (timestamp.HasValue)
                             {
                                 files.Add(new Level2FileInfo
                                 {
-                                    Key = key,
-                                    Url = $"{AWS_NEXRAD_BUCKET}/{key}",
-                                    Timestamp = timestamp.Value,
-                                    Size = fileSize
+                                    FileName = fileName,
+                                    Url = $"{directoryUrl}{fileName}",
+                                    Timestamp = timestamp.Value
                                 });
                             }
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Error listing files for {date:yyyy-MM-dd}: {ex.Message}");
-                    }
+
+                    System.Diagnostics.Debug.WriteLine($"Found {files.Count} files in directory listing");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error listing NOMADS files: {ex.Message}");
                 }
 
                 // Sort by timestamp (newest first) and return requested count
-                return files.OrderByDescending(f => f.Timestamp).Take(maxFiles * 2).ToList();
+                return files.OrderByDescending(f => f.Timestamp).Take(maxFiles).ToList();
             }
             catch (Exception ex)
             {
@@ -173,13 +161,13 @@ namespace OhioNewsWeather.WeatherApp.Services
         {
             try
             {
-                System.Diagnostics.Debug.WriteLine($"Downloading {fileInfo.Key} ({fileInfo.Size / 1024}KB)");
+                System.Diagnostics.Debug.WriteLine($"Downloading {fileInfo.FileName} from NOMADS");
 
                 // Download file
                 var fileData = await _httpClient.GetByteArrayAsync(fileInfo.Url);
-                System.Diagnostics.Debug.WriteLine($"Downloaded {fileData.Length} bytes");
+                System.Diagnostics.Debug.WriteLine($"Downloaded {fileData.Length / 1024}KB ({fileData.Length} bytes)");
 
-                // Parse Level 2 data
+                // Parse Level 2 data (parser will handle bzip2 decompression)
                 var level2Data = _parser.ParseLevel2File(fileData);
                 if (level2Data == null || level2Data.Sweeps.Count == 0)
                 {
@@ -253,10 +241,13 @@ namespace OhioNewsWeather.WeatherApp.Services
                 double maxRangeKm = 230.0; // Maximum range in km
                 double pixelsPerKm = (width / 2.0) * 0.9 / maxRangeKm; // Use 90% of canvas
 
+                int radialCount = 0;
                 foreach (var radial in sweep.Radials)
                 {
                     if (radial.ReflectivityGates == null || radial.ReflectivityGates.Count == 0)
                         continue;
+
+                    radialCount++;
 
                     // Convert azimuth to radians (meteorological azimuth: 0° = North, clockwise)
                     double azimuthRad = (radial.Azimuth - 90.0) * Math.PI / 180.0;
@@ -314,6 +305,8 @@ namespace OhioNewsWeather.WeatherApp.Services
                     }
                 }
 
+                System.Diagnostics.Debug.WriteLine($"Rendered {radialCount} radials to {width}x{height} image");
+
                 // Create BitmapSource
                 var bitmap = BitmapSource.Create(
                     width, height,
@@ -339,7 +332,6 @@ namespace OhioNewsWeather.WeatherApp.Services
                     bitmapImage.Freeze();
                 }
 
-                System.Diagnostics.Debug.WriteLine($"Rendered {width}x{height} radar image");
                 return bitmapImage;
             }
             catch (Exception ex)
@@ -372,23 +364,16 @@ namespace OhioNewsWeather.WeatherApp.Services
             return Color.FromArgb(255, 253, 253, 253);                 // White (extreme)
         }
 
-        private DateTime? ParseTimestampFromFileName(string fileName)
+        private DateTime? ParseTimestamp(string datePart, string timePart)
         {
             try
             {
-                // Format: SITE_YYYYMMDD_HHMMSS_V06
-                var parts = fileName.Split('_');
-                if (parts.Length < 3) return null;
-
-                var datePart = parts[1]; // YYYYMMDD
-                var timePart = parts[2]; // HHMMSS
-
-                if (datePart.Length != 8 || timePart.Length != 6) return null;
-
+                // YYYYMMDD format
                 int year = int.Parse(datePart.Substring(0, 4));
                 int month = int.Parse(datePart.Substring(4, 2));
                 int day = int.Parse(datePart.Substring(6, 2));
 
+                // HHMMSS format
                 int hour = int.Parse(timePart.Substring(0, 2));
                 int minute = int.Parse(timePart.Substring(2, 2));
                 int second = int.Parse(timePart.Substring(4, 2));
@@ -403,10 +388,9 @@ namespace OhioNewsWeather.WeatherApp.Services
 
         private class Level2FileInfo
         {
-            public string Key { get; set; }
+            public string FileName { get; set; }
             public string Url { get; set; }
             public DateTime Timestamp { get; set; }
-            public long Size { get; set; }
         }
     }
 }

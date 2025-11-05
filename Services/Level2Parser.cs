@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using SharpCompress.Compressors.BZip2;
 
 namespace OhioNewsWeather.WeatherApp.Services
 {
@@ -60,12 +61,25 @@ namespace OhioNewsWeather.WeatherApp.Services
                 }
             }
 
-            // Check for bzip2 (42 5A)
+            // Check for bzip2 (42 5A - "BZ")
             if (data[0] == 0x42 && data[1] == 0x5A)
             {
-                System.Diagnostics.Debug.WriteLine("Detected bzip2 compression (not supported, will try parsing as-is)");
-                // Would need SharpCompress or similar for bzip2
-                // Most modern files are uncompressed
+                System.Diagnostics.Debug.WriteLine("Detected bzip2 compression");
+                try
+                {
+                    using var input = new MemoryStream(data);
+                    using var bzip2 = new BZip2Stream(input, SharpCompress.Compressors.CompressionMode.Decompress, false);
+                    using var output = new MemoryStream();
+                    bzip2.CopyTo(output);
+                    var decompressed = output.ToArray();
+                    System.Diagnostics.Debug.WriteLine($"Bzip2 decompressed: {data.Length} -> {decompressed.Length} bytes");
+                    return decompressed;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Bzip2 decompression failed: {ex.Message}");
+                    return data;
+                }
             }
 
             return data;
