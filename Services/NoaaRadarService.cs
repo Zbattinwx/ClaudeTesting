@@ -64,14 +64,15 @@ namespace OhioNewsWeather.WeatherApp.Services
                 var productCode = GetProductLayerName(product);
 
                 // Build WMS request for Iowa State Mesonet RIDGE service
-                // URL format: each product has its own CGI endpoint
+                // Use the composite layer name (nexrad-n0r-900913) with site in CQL_FILTER
                 var baseUrl = $"https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/{productCode}.cgi";
 
                 var wmsUrl = $"{baseUrl}" +
                     $"?SERVICE=WMS" +
                     $"&VERSION=1.1.1" +
                     $"&REQUEST=GetMap" +
-                    $"&LAYERS={site.SiteId}" +
+                    $"&LAYERS=nexrad-{productCode}-900913" +
+                    $"&CQL_FILTER=nexrad_id='{site.SiteId}'" +
                     $"&STYLES=" +
                     $"&SRS=EPSG:4326" +
                     $"&BBOX={minLon},{minLat},{maxLon},{maxLat}" +
