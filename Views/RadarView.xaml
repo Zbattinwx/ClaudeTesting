@@ -159,12 +159,14 @@
                 </ScrollViewer>
 
                 <!-- Zoom Controls (Floating) -->
-                <StackPanel VerticalAlignment="Bottom"
-                          HorizontalAlignment="Right"
-                          Margin="20"
-                          Background="#CC2D2D2D"
-                          Padding="10">
-                    <Button Content="+"
+                <Border VerticalAlignment="Bottom"
+                        HorizontalAlignment="Right"
+                        Margin="20"
+                        Background="#CC2D2D2D"
+                        Padding="10"
+                        CornerRadius="5">
+                    <StackPanel>
+                        <Button Content="+"
                           FontSize="20"
                           FontWeight="Bold"
                           Width="40"
@@ -197,7 +199,8 @@
                           Style="{StaticResource MaterialDesignFloatingActionButton}"
                           Background="#455A64"
                           ToolTip="Reset Zoom"/>
-                </StackPanel>
+                    </StackPanel>
+                </Border>
 
                 <!-- Loading Indicator -->
                 <Grid x:Name="LoadingOverlay"

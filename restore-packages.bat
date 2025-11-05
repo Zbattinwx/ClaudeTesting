@@ -30,9 +30,19 @@ if %errorlevel% neq 0 (
 
 echo.
 echo Building project...
-dotnet build OhioWeather.csproj
+dotnet build OhioWeather.csproj --verbosity minimal
 if %errorlevel% neq 0 (
+    echo.
     echo ERROR: Build failed!
+    echo.
+    echo Common fixes:
+    echo - Make sure Visual Studio 2022 is closed
+    echo - Delete bin, obj, and .vs folders
+    echo - Run this script again
+    echo.
+    echo If the error mentions XAML, the issue is in a .xaml file
+    echo Open OhioWeather.sln in Visual Studio to see the exact line
+    echo.
     pause
     exit /b 1
 )
