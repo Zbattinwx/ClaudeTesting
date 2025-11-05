@@ -92,6 +92,14 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                 System.Diagnostics.Debug.WriteLine($"Received {imageBytes.Length} bytes from {wmsUrl}");
 
+                // If response is suspiciously small, it's probably an error message
+                if (imageBytes.Length < 1000)
+                {
+                    var errorMessage = System.Text.Encoding.UTF8.GetString(imageBytes);
+                    System.Diagnostics.Debug.WriteLine($"WMS Error Response: {errorMessage}");
+                    return null;
+                }
+
                 var bitmap = new BitmapImage();
                 using (var stream = new System.IO.MemoryStream(imageBytes))
                 {
