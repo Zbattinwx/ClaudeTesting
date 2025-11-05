@@ -10,23 +10,25 @@ namespace OhioNewsWeather.WeatherApp.Services
     public class NoaaRadarService : IRadarService
     {
         private readonly HttpClient _httpClient;
-        private const string RadarBaseUrl = "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows";
+        private readonly IRadarSiteService _radarSiteService;
+        private const string RidgeBaseUrl = "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi";
 
-        public NoaaRadarService(IHttpClientFactory httpClientFactory)
+        public NoaaRadarService(IHttpClientFactory httpClientFactory, IRadarSiteService radarSiteService)
         {
             _httpClient = httpClientFactory.CreateClient();
+            _radarSiteService = radarSiteService;
         }
 
-        public async Task<RadarFrame[]> GetRadarFramesAsync(Location location, int frameCount = 10)
+        public async Task<RadarFrame[]> GetRadarFramesAsync(RadarSite site, RadarFrame.RadarProduct product = RadarFrame.RadarProduct.Reflectivity, int frameCount = 10)
         {
             var frames = new System.Collections.Generic.List<RadarFrame>();
             var now = DateTime.UtcNow;
 
-            // Generate frames for the last N intervals (6 minutes each)
+            // Level 2 radar updates approximately every 4-6 minutes
             for (int i = frameCount - 1; i >= 0; i--)
             {
-                var timestamp = now.AddMinutes(-6 * i);
-                var frame = await GetRadarFrameAsync(location, timestamp);
+                var timestamp = now.AddMinutes(-5 * i);
+                var frame = await GetRadarFrameBySiteAsync(site, product, timestamp);
                 if (frame != null)
                 {
                     frames.Add(frame);
@@ -36,37 +38,46 @@ namespace OhioNewsWeather.WeatherApp.Services
             return frames.ToArray();
         }
 
-        public async Task<RadarFrame> GetLatestRadarFrameAsync(Location location)
+        public async Task<RadarFrame> GetLatestRadarFrameAsync(RadarSite site, RadarFrame.RadarProduct product = RadarFrame.RadarProduct.Reflectivity)
         {
-            return await GetRadarFrameAsync(location, DateTime.UtcNow);
+            return await GetRadarFrameBySiteAsync(site, product, DateTime.UtcNow);
         }
 
-        private async Task<RadarFrame> GetRadarFrameAsync(Location location, DateTime timestamp)
+        public async Task<RadarFrame[]> GetRadarFramesByLocationAsync(Location location, int frameCount = 10)
+        {
+            var nearestSite = _radarSiteService.GetNearestRadarSite(location);
+            return await GetRadarFramesAsync(nearestSite, RadarFrame.RadarProduct.Reflectivity, frameCount);
+        }
+
+        private async Task<RadarFrame> GetRadarFrameBySiteAsync(RadarSite site, RadarFrame.RadarProduct product, DateTime timestamp)
         {
             try
             {
-                // Calculate bounding box (approximately 200km around location)
-                var latOffset = 1.8; // ~200km
-                var lonOffset = 2.4; // ~200km (adjusted for latitude)
+                // Calculate bounding box around radar site (approximately 230km radius for Level 2)
+                var radiusInDegrees = 2.5; // ~250km coverage
 
-                var minLon = location.Longitude - lonOffset;
-                var maxLon = location.Longitude + lonOffset;
-                var minLat = location.Latitude - latOffset;
-                var maxLat = location.Latitude + latOffset;
+                var minLon = site.Longitude - radiusInDegrees;
+                var maxLon = site.Longitude + radiusInDegrees;
+                var minLat = site.Latitude - radiusInDegrees;
+                var maxLat = site.Latitude + radiusInDegrees;
 
-                // Build WMS request for radar imagery
-                var wmsUrl = $"{RadarBaseUrl}" +
+                // Get product layer name
+                var layerName = GetProductLayerName(product);
+
+                // Build WMS request for specific radar site
+                var wmsUrl = $"{RidgeBaseUrl}" +
                     $"?SERVICE=WMS" +
-                    $"&VERSION=1.3.0" +
+                    $"&VERSION=1.1.1" +
                     $"&REQUEST=GetMap" +
-                    $"&LAYERS=conus_bref_qcd" +
+                    $"&LAYERS=nexrad-{layerName}-{site.SiteId}" +
                     $"&STYLES=" +
-                    $"&CRS=EPSG:4326" +
-                    $"&BBOX={minLat},{minLon},{maxLat},{maxLon}" +
-                    $"&WIDTH=800" +
-                    $"&HEIGHT=800" +
+                    $"&SRS=EPSG:4326" +
+                    $"&BBOX={minLon},{minLat},{maxLon},{maxLat}" +
+                    $"&WIDTH=1024" +
+                    $"&HEIGHT=1024" +
                     $"&FORMAT=image/png" +
-                    $"&TRANSPARENT=true";
+                    $"&TRANSPARENT=true" +
+                    $"&bgcolor=0x000000";
 
                 var imageBytes = await _httpClient.GetByteArrayAsync(wmsUrl);
                 var bitmap = new BitmapImage();
@@ -84,9 +95,9 @@ namespace OhioNewsWeather.WeatherApp.Services
                     Timestamp = timestamp,
                     ImageUrl = wmsUrl,
                     Image = bitmap,
-                    Product = RadarFrame.RadarProduct.Reflectivity,
-                    CenterLatitude = location.Latitude,
-                    CenterLongitude = location.Longitude,
+                    Product = product,
+                    CenterLatitude = site.Latitude,
+                    CenterLongitude = site.Longitude,
                     ZoomLevel = 8
                 };
             }
@@ -94,6 +105,19 @@ namespace OhioNewsWeather.WeatherApp.Services
             {
                 return null;
             }
+        }
+
+        private string GetProductLayerName(RadarFrame.RadarProduct product)
+        {
+            return product switch
+            {
+                RadarFrame.RadarProduct.Reflectivity => "n0r",
+                RadarFrame.RadarProduct.Velocity => "n0v",
+                RadarFrame.RadarProduct.CorrelationCoefficient => "n0c",
+                RadarFrame.RadarProduct.DifferentialReflectivity => "n0x",
+                RadarFrame.RadarProduct.SpecificDifferentialPhase => "n0k",
+                _ => "n0r"
+            };
         }
     }
 }

@@ -21,6 +21,7 @@ namespace OhioNewsWeather.WeatherApp
             // Services
             services.AddHttpClient();
             services.AddSingleton<IWeatherService, NoaaWeatherService>();
+            services.AddSingleton<IRadarSiteService, RadarSiteService>();
             services.AddSingleton<IRadarService, NoaaRadarService>();
             services.AddSingleton<ISatelliteService, GoesSatelliteService>();
             services.AddSingleton<ILocationService, OhioLocationService>();
@@ -32,16 +33,14 @@ namespace OhioNewsWeather.WeatherApp
             services.AddTransient<RadarViewModel>();
             services.AddTransient<SatelliteViewModel>();
             services.AddTransient<AlertsViewModel>();
-
-            // Main Window
-            services.AddSingleton<MainWindow>();
         }
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
 
-            var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
+            var mainViewModel = _serviceProvider.GetRequiredService<MainViewModel>();
+            var mainWindow = new MainWindow(mainViewModel, _serviceProvider);
             mainWindow.Show();
         }
 

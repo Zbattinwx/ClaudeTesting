@@ -4,7 +4,7 @@ A full-featured Windows weather application built for Ohio News and Weather fore
 
 ## Features
 
-### Current Implementation (Phase 1-2)
+### Current Implementation (Phase 1-3)
 
 ✅ **Core Architecture**
 - WPF .NET 8 application with modern Material Design UI
@@ -13,7 +13,8 @@ A full-featured Windows weather application built for Ohio News and Weather fore
 
 ✅ **Data Services**
 - NOAA/NWS API integration for weather data and alerts
-- High-resolution radar imagery via NOAA GeoServer
+- High-resolution Level 2 NEXRAD radar data
+- Individual radar site selection (8 sites covering Ohio)
 - GOES satellite imagery (visible and infrared)
 - Comprehensive Ohio location database (75+ cities and towns)
 
@@ -23,11 +24,20 @@ A full-featured Windows weather application built for Ohio News and Weather fore
 - Hourly forecasts
 - Severe weather alerts and warnings
 
-✅ **Radar & Satellite**
-- Hi-res radar with animation controls
+✅ **Radar View (NEW in Phase 3)**
+- **Individual Radar Site Selection** - Choose from 8 NEXRAD sites (KCLE, KILN, KIWX, etc.)
+- **Level 2 Radar Products** - Reflectivity, Velocity, Correlation Coefficient
+- **Hi-Res Display** - 1024x1024 radar imagery with 250km coverage
+- **Animation Controls** - Play/pause, adjustable speed (100-1000ms), frame timeline
+- **Zoom & Pan** - 50%-300% zoom with floating zoom controls
+- **Real-time Updates** - 4-6 minute update intervals for storm tracking
+- **ONW Branding** - Logo overlay and timestamp display
+- **Dark Theme UI** - Professional broadcast-ready interface
+
+✅ **Satellite (In Development)**
 - Visible and infrared satellite imagery
 - Loop playback with configurable speed
-- Zoom and pan capabilities
+- Animation controls
 
 ✅ **Export System**
 - Export current view to PNG/JPG
@@ -39,12 +49,54 @@ A full-featured Windows weather application built for Ohio News and Weather fore
 
 The application features a clean, modern interface with sidebar navigation:
 
-- **Radar** - Interactive radar display with animation
-- **Satellite** - Satellite imagery viewer
-- **Alerts** - Active watches and warnings
-- **Conditions** - Current weather observations
-- **Export** - Social media export tools
-- **Settings** - Application configuration
+- **Radar** ✅ - Interactive Level 2 radar display with site selection
+- **Satellite** - Satellite imagery viewer (in development)
+- **Alerts** - Active watches and warnings (in development)
+- **Conditions** - Current weather observations (in development)
+- **Export** - Social media export tools (in development)
+- **Settings** - Application configuration (in development)
+
+## Radar Features (Phase 3)
+
+### NEXRAD Radar Sites
+
+The application includes 8 NEXRAD Level 2 radar sites covering Ohio:
+
+| Site ID | Location | State | Primary |
+|---------|----------|-------|---------|
+| KCLE | Cleveland, OH | OH | ✅ Primary |
+| KILN | Wilmington, OH | OH | ✅ Primary |
+| KIWX | North Webster, IN | IN | Coverage for NW Ohio |
+| KLOT | Romeoville, IL | IL | Coverage for NW Ohio |
+| KFWA | Fort Wayne, IN | IN | Coverage for NE Ohio |
+| KPBZ | Pittsburgh, PA | PA | Coverage for E Ohio |
+| RLBE | Charleston, WV | WV | Coverage for SE Ohio |
+| KDTX | White Lake, MI | MI | Coverage for N Ohio |
+
+### Radar Products
+
+- **Reflectivity (N0R)** - Base reflectivity, shows precipitation intensity
+- **Velocity (N0V)** - Base velocity, shows wind speed and direction (toward/away)
+- **Correlation Coefficient (N0C)** - Shows precipitation type and quality
+
+### Radar Controls
+
+- **Site Selector** - Dropdown to choose radar site
+- **Product Selector** - Radio buttons for Reflectivity, Velocity, Correlation
+- **Load Radar** - Fetches latest 10 frames from selected site
+- **Play/Pause** - Animates through radar frames
+- **Speed Control** - Adjustable animation speed (100ms - 1000ms)
+- **Frame Slider** - Manual frame navigation
+- **Zoom Controls** - +/- buttons and reset (50% - 300%)
+- **Export** - Save current frame to file
+
+### Branding Integration
+
+The radar view includes Ohio News and Weather branding:
+- ONW logo overlay (top left)
+- Timestamp display (bottom right)
+- Dark professional theme
+- Ready for broadcast and social media use
 
 ## Technical Architecture
 

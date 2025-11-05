@@ -10,7 +10,7 @@ namespace OhioNewsWeather.WeatherApp.ViewModels
     public partial class RadarViewModel : ObservableObject
     {
         private readonly IRadarService _radarService;
-        private readonly ILocationService _locationService;
+        private readonly IRadarSiteService _radarSiteService;
         private readonly IExportService _exportService;
 
         [ObservableProperty]
@@ -20,7 +20,13 @@ namespace OhioNewsWeather.WeatherApp.ViewModels
         private RadarFrame _currentFrame;
 
         [ObservableProperty]
-        private Location _selectedLocation;
+        private ObservableCollection<RadarSite> _radarSites;
+
+        [ObservableProperty]
+        private RadarSite _selectedRadarSite;
+
+        [ObservableProperty]
+        private RadarFrame.RadarProduct _selectedProduct;
 
         [ObservableProperty]
         private bool _isPlaying;
@@ -31,19 +37,25 @@ namespace OhioNewsWeather.WeatherApp.ViewModels
         [ObservableProperty]
         private string _statusMessage;
 
+        [ObservableProperty]
+        private int _animationSpeed;
+
         private System.Windows.Threading.DispatcherTimer _animationTimer;
 
         public RadarViewModel(
             IRadarService radarService,
-            ILocationService locationService,
+            IRadarSiteService radarSiteService,
             IExportService exportService)
         {
             _radarService = radarService;
-            _locationService = locationService;
+            _radarSiteService = radarSiteService;
             _exportService = exportService;
 
             RadarFrames = new ObservableCollection<RadarFrame>();
-            SelectedLocation = _locationService.GetDefaultLocation();
+            RadarSites = new ObservableCollection<RadarSite>(_radarSiteService.GetOhioRadarSites());
+            SelectedRadarSite = _radarSiteService.GetDefaultRadarSite();
+            SelectedProduct = RadarFrame.RadarProduct.Reflectivity;
+            AnimationSpeed = 500;
             StatusMessage = "Ready";
 
             InitializeAnimationTimer();
@@ -53,22 +65,30 @@ namespace OhioNewsWeather.WeatherApp.ViewModels
         {
             _animationTimer = new System.Windows.Threading.DispatcherTimer
             {
-                Interval = System.TimeSpan.FromMilliseconds(500)
+                Interval = System.TimeSpan.FromMilliseconds(AnimationSpeed)
             };
             _animationTimer.Tick += AnimationTimer_Tick;
+        }
+
+        partial void OnAnimationSpeedChanged(int value)
+        {
+            if (_animationTimer != null)
+            {
+                _animationTimer.Interval = System.TimeSpan.FromMilliseconds(value);
+            }
         }
 
         [RelayCommand]
         private async System.Threading.Tasks.Task LoadRadarAsync()
         {
-            if (SelectedLocation == null)
+            if (SelectedRadarSite == null)
                 return;
 
             try
             {
-                StatusMessage = "Loading radar data...";
+                StatusMessage = $"Loading {SelectedProduct} from {SelectedRadarSite.SiteId}...";
 
-                var frames = await _radarService.GetRadarFramesAsync(SelectedLocation, 10);
+                var frames = await _radarService.GetRadarFramesAsync(SelectedRadarSite, SelectedProduct, 10);
                 RadarFrames.Clear();
                 foreach (var frame in frames)
                 {
@@ -81,12 +101,25 @@ namespace OhioNewsWeather.WeatherApp.ViewModels
                     CurrentFrame = RadarFrames[CurrentFrameIndex];
                 }
 
-                StatusMessage = $"Loaded {RadarFrames.Count} radar frames";
+                StatusMessage = $"Loaded {RadarFrames.Count} frames from {SelectedRadarSite.SiteId}";
             }
             catch (System.Exception ex)
             {
                 StatusMessage = $"Error loading radar: {ex.Message}";
             }
+        }
+
+        [RelayCommand]
+        private async System.Threading.Tasks.Task ChangeProductAsync(RadarFrame.RadarProduct product)
+        {
+            SelectedProduct = product;
+            await LoadRadarAsync();
+        }
+
+        [RelayCommand]
+        private async System.Threading.Tasks.Task ChangeSiteAsync()
+        {
+            await LoadRadarAsync();
         }
 
         [RelayCommand]

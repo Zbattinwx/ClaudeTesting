@@ -1,23 +1,39 @@
 using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
 using OhioNewsWeather.WeatherApp.ViewModels;
+using OhioNewsWeather.WeatherApp.Views;
 
 namespace OhioNewsWeather.WeatherApp
 {
     public partial class MainWindow : Window
     {
         private readonly MainViewModel _viewModel;
+        private readonly System.IServiceProvider _serviceProvider;
 
-        public MainWindow(MainViewModel viewModel)
+        public MainWindow(MainViewModel viewModel, System.IServiceProvider serviceProvider)
         {
             InitializeComponent();
             _viewModel = viewModel;
+            _serviceProvider = serviceProvider;
             DataContext = _viewModel;
         }
 
         private void RadarButton_Click(object sender, RoutedEventArgs e)
         {
             UpdateStatus("Loading Radar...");
-            // TODO: Load Radar view
+            LoadRadarView();
+        }
+
+        private void LoadRadarView()
+        {
+            var radarViewModel = _serviceProvider.GetRequiredService<RadarViewModel>();
+            var radarView = new RadarView
+            {
+                DataContext = radarViewModel
+            };
+
+            ContentArea.Children.Clear();
+            ContentArea.Children.Add(radarView);
         }
 
         private void SatelliteButton_Click(object sender, RoutedEventArgs e)
