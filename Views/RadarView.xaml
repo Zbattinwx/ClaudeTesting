@@ -266,7 +266,7 @@
                     <Slider x:Name="FrameSlider"
                           Grid.Row="0"
                           Minimum="0"
-                          Maximum="{Binding RadarFrames.Count, Converter={StaticResource MaxFrameConverter}}"
+                          Maximum="{Binding RadarFrames.Count, Mode=OneWay, Converter={StaticResource MaxFrameConverter}}"
                           Value="{Binding CurrentFrameIndex, Mode=TwoWay}"
                           Style="{StaticResource MaterialDesignDiscreteSlider}"
                           TickFrequency="1"
@@ -280,7 +280,7 @@
                         <Run Text="Frame "/>
                         <Run Text="{Binding CurrentFrameIndex, StringFormat={}{0:0}}"/>
                         <Run Text=" of "/>
-                        <Run Text="{Binding RadarFrames.Count, StringFormat={}{0:0}}"/>
+                        <Run Text="{Binding RadarFrames.Count, Mode=OneWay, StringFormat={}{0:0}}"/>
                     </TextBlock>
                 </Grid>
 
