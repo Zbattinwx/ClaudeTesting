@@ -67,12 +67,16 @@ namespace OhioNewsWeather.WeatherApp.Services
                 // Use the composite layer name (nexrad-n0r-900913) with site in CQL_FILTER
                 var baseUrl = $"https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/{productCode}.cgi";
 
+                // Format timestamp for WMS TIME parameter (ISO 8601)
+                var timeString = timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
                 var wmsUrl = $"{baseUrl}" +
                     $"?SERVICE=WMS" +
                     $"&VERSION=1.1.1" +
                     $"&REQUEST=GetMap" +
                     $"&LAYERS=nexrad-{productCode}-900913" +
                     $"&CQL_FILTER=nexrad_id='{site.SiteId}'" +
+                    $"&TIME={timeString}" +
                     $"&STYLES=" +
                     $"&SRS=EPSG:4326" +
                     $"&BBOX={minLon},{minLat},{maxLon},{maxLat}" +
@@ -91,7 +95,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                     return null;
                 }
 
-                System.Diagnostics.Debug.WriteLine($"Received {imageBytes.Length} bytes from {wmsUrl}");
+                System.Diagnostics.Debug.WriteLine($"Received {imageBytes.Length} bytes for {site.SiteId} at {timeString}");
 
                 // If response is suspiciously small, it's probably an error message
                 if (imageBytes.Length < 1000)

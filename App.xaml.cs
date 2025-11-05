@@ -22,7 +22,7 @@ namespace OhioNewsWeather.WeatherApp
             services.AddHttpClient();
             services.AddSingleton<IWeatherService, NoaaWeatherService>();
             services.AddSingleton<IRadarSiteService, RadarSiteService>();
-            services.AddSingleton<IRadarService, NoaaRadarService>();
+            services.AddSingleton<IRadarService, NexradLevel2Service>(); // Using Level 2 archive imagery
             services.AddSingleton<ISatelliteService, GoesSatelliteService>();
             services.AddSingleton<ILocationService, OhioLocationService>();
             services.AddSingleton<IAlertService, NoaaAlertService>();
