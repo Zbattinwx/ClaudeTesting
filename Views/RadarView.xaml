@@ -120,8 +120,15 @@
                             VerticalScrollBarVisibility="Auto"
                             Background="Black">
                     <Grid x:Name="RadarCanvasContainer">
+                        <!-- Base Map (OpenStreetMap) -->
+                        <Image x:Name="BaseMapImage"
+                             Source="https://tile.openstreetmap.org/8/71/97.png"
+                             Stretch="Fill"
+                             Opacity="0.7"/>
+
+                        <!-- Radar Image Overlay -->
                         <Image x:Name="RadarImage"
-                             Source="{Binding CurrentFrame.Image}"
+                             Source="{Binding CurrentFrame.Image, Mode=OneWay}"
                              Stretch="Uniform"
                              RenderOptions.BitmapScalingMode="HighQuality">
                             <Image.LayoutTransform>

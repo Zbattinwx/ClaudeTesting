@@ -89,16 +89,24 @@ namespace OhioNewsWeather.WeatherApp.ViewModels
                 StatusMessage = $"Loading {SelectedProduct} from {SelectedRadarSite.SiteId}...";
 
                 var frames = await _radarService.GetRadarFramesAsync(SelectedRadarSite, SelectedProduct, 10);
+
+                System.Diagnostics.Debug.WriteLine($"Received {frames?.Length ?? 0} frames from service");
+
                 RadarFrames.Clear();
                 foreach (var frame in frames)
                 {
-                    RadarFrames.Add(frame);
+                    if (frame != null)
+                    {
+                        RadarFrames.Add(frame);
+                        System.Diagnostics.Debug.WriteLine($"Added frame {RadarFrames.Count}: {frame.Timestamp}");
+                    }
                 }
 
                 if (RadarFrames.Any())
                 {
                     CurrentFrameIndex = RadarFrames.Count - 1;
                     CurrentFrame = RadarFrames[CurrentFrameIndex];
+                    System.Diagnostics.Debug.WriteLine($"Set initial frame to index {CurrentFrameIndex}");
                 }
 
                 StatusMessage = $"Loaded {RadarFrames.Count} frames from {SelectedRadarSite.SiteId}";
@@ -161,8 +169,11 @@ namespace OhioNewsWeather.WeatherApp.ViewModels
             if (RadarFrames.Count == 0)
                 return;
 
+            var oldIndex = CurrentFrameIndex;
             CurrentFrameIndex = (CurrentFrameIndex + 1) % RadarFrames.Count;
             CurrentFrame = RadarFrames[CurrentFrameIndex];
+
+            System.Diagnostics.Debug.WriteLine($"Animation tick: Frame {oldIndex} -> {CurrentFrameIndex} (Total: {RadarFrames.Count})");
         }
     }
 }
