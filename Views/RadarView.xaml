@@ -7,6 +7,13 @@
              xmlns:local="clr-namespace:OhioNewsWeather.WeatherApp.Views"
              mc:Ignorable="d"
              d:DesignHeight="800" d:DesignWidth="1200">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+        <!-- Converter to get max frame index (count - 1) -->
+        <local:MaxFrameIndexConverter x:Key="MaxFrameConverter"/>
+    </UserControl.Resources>
+
     <Grid Background="#1E1E1E">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -324,11 +331,4 @@
             </Grid>
         </Border>
     </Grid>
-
-    <UserControl.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
-
-        <!-- Converter to get max frame index (count - 1) -->
-        <local:MaxFrameIndexConverter x:Key="MaxFrameConverter"/>
-    </UserControl.Resources>
 </UserControl>
