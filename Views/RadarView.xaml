@@ -35,7 +35,6 @@
                     <ComboBox x:Name="RadarSiteComboBox"
                             ItemsSource="{Binding RadarSites}"
                             SelectedItem="{Binding SelectedRadarSite, Mode=TwoWay}"
-                            DisplayMemberPath="ToString"
                             Width="200"
                             Style="{StaticResource MaterialDesignOutlinedComboBox}"
                             materialDesign:TextFieldAssist.UnderlineBrush="White"
