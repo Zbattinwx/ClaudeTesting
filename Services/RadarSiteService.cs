@@ -51,12 +51,11 @@ namespace OhioNewsWeather.WeatherApp.Services
                 new RadarSite("KILN", "Wilmington", "Wilmington, OH", 39.4202, -83.8217, "OH", 1056, true),
 
                 // Surrounding Sites (cover Ohio regions)
+                new RadarSite("KIND", "Indianapolis", "Indianapolis, IN", 39.7075, -86.2803, "IN", 810),
                 new RadarSite("KIWX", "Northern Indiana", "North Webster, IN", 41.3586, -85.7000, "IN", 960),
-                new RadarSite("KLOT", "Chicago", "Romeoville, IL", 41.6044, -88.0844, "IL", 663),
-                new RadarSite("KFWA", "Fort Wayne", "Fort Wayne, IN", 40.9779, -85.4439, "IN", 814),
+                new RadarSite("KDTX", "Detroit", "White Lake, MI", 42.6997, -83.4717, "MI", 1072),
                 new RadarSite("KPBZ", "Pittsburgh", "Pittsburgh, PA", 40.5317, -80.2178, "PA", 1185),
-                new RadarSite("RLBE", "Charleston", "Charleston, WV", 38.3111, -81.8222, "WV", 1081),
-                new RadarSite("KDTX", "Detroit", "White Lake, MI", 42.6997, -83.4717, "MI", 1072)
+                new RadarSite("KRLX", "Charleston", "Charleston, WV", 38.3111, -81.7231, "WV", 1081)
             };
         }
 

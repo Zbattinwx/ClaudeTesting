@@ -11,7 +11,6 @@ namespace OhioNewsWeather.WeatherApp.Services
     {
         private readonly HttpClient _httpClient;
         private readonly IRadarSiteService _radarSiteService;
-        private const string RidgeBaseUrl = "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi";
 
         public NoaaRadarService(IHttpClientFactory httpClientFactory, IRadarSiteService radarSiteService)
         {
@@ -62,14 +61,17 @@ namespace OhioNewsWeather.WeatherApp.Services
                 var maxLat = site.Latitude + radiusInDegrees;
 
                 // Get product layer name
-                var layerName = GetProductLayerName(product);
+                var productCode = GetProductLayerName(product);
 
-                // Build WMS request for specific radar site
-                var wmsUrl = $"{RidgeBaseUrl}" +
+                // Build WMS request for Iowa State Mesonet RIDGE service
+                // URL format: each product has its own CGI endpoint
+                var baseUrl = $"https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/{productCode}.cgi";
+
+                var wmsUrl = $"{baseUrl}" +
                     $"?SERVICE=WMS" +
                     $"&VERSION=1.1.1" +
                     $"&REQUEST=GetMap" +
-                    $"&LAYERS=nexrad-{layerName}-{site.SiteId}" +
+                    $"&LAYERS={site.SiteId}" +
                     $"&STYLES=" +
                     $"&SRS=EPSG:4326" +
                     $"&BBOX={minLon},{minLat},{maxLon},{maxLat}" +
@@ -80,6 +82,16 @@ namespace OhioNewsWeather.WeatherApp.Services
                     $"&bgcolor=0x000000";
 
                 var imageBytes = await _httpClient.GetByteArrayAsync(wmsUrl);
+
+                // Check if we got valid data
+                if (imageBytes == null || imageBytes.Length == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"No image data received from {wmsUrl}");
+                    return null;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"Received {imageBytes.Length} bytes from {wmsUrl}");
+
                 var bitmap = new BitmapImage();
                 using (var stream = new System.IO.MemoryStream(imageBytes))
                 {
@@ -101,8 +113,9 @@ namespace OhioNewsWeather.WeatherApp.Services
                     ZoomLevel = 8
                 };
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"Error loading radar frame from {site.SiteId}: {ex.Message}");
                 return null;
             }
         }
