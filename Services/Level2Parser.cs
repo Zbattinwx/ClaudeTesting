@@ -39,6 +39,9 @@ namespace OhioNewsWeather.WeatherApp.Services
         {
             if (data.Length < 2) return data;
 
+            // Log first few bytes for diagnosis
+            System.Diagnostics.Debug.WriteLine($"First bytes: {data[0]:X2} {data[1]:X2} {data[2]:X2} {data[3]:X2} {data[4]:X2} {data[5]:X2} {data[6]:X2} {data[7]:X2}");
+
             // Check for gzip (0x1f 0x8b)
             if (data[0] == 0x1f && data[1] == 0x8b)
             {
@@ -79,6 +82,14 @@ namespace OhioNewsWeather.WeatherApp.Services
                 }
             }
 
+            // Check for AR2V (uncompressed Archive II)
+            if (data.Length > 10 && data[0] == 0x41 && data[1] == 0x52 && data[2] == 0x32 && data[3] == 0x56)
+            {
+                System.Diagnostics.Debug.WriteLine("Detected uncompressed Archive II format");
+                return data;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Unknown format, treating as uncompressed");
             return data;
         }
 
