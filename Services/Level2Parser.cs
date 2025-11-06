@@ -7,33 +7,30 @@ using SharpCompress.Compressors.BZip2;
 namespace OhioNewsWeather.WeatherApp.Services
 {
     /// <summary>
-    /// Robust parser for NEXRAD Level 2 radar data (Message 31 format)
-    /// Implements NOAA ICD specification for digital radar data
+    /// NEXRAD Level 2 parser implementing NOAA ICD for Build RDA 18.0
+    /// Correctly parses Archive II format with Message 31 digital radar data
     /// </summary>
     public class Level2Parser
     {
-        private const int VOLUME_HEADER_SIZE = 24;
-        private const int LDM_RECORD_SIZE = 2432;
-        private const int MESSAGE_HEADER_SIZE = 16;
+        private const int ARCHIVE2_HEADER_SIZE = 24;
+        private const int CTM_HEADER_SIZE = 12;
+        private const int MESSAGE_SIZE = 2432;
 
-        /// <summary>
-        /// Parse a Level 2 radar file and extract all elevation sweeps
-        /// </summary>
         public Level2Data ParseLevel2File(byte[] fileData)
         {
             try
             {
-                System.Diagnostics.Debug.WriteLine($"Parsing Level 2 file: {fileData.Length} bytes");
+                System.Diagnostics.Debug.WriteLine($"=== Starting Level 2 Parse: {fileData.Length} bytes ===");
 
-                // Check for compression and decompress if needed
+                // Decompress if needed
                 byte[] data = DecompressIfNeeded(fileData);
-                System.Diagnostics.Debug.WriteLine($"Working with {data.Length} bytes after decompression check");
+                System.Diagnostics.Debug.WriteLine($"After decompression: {data.Length} bytes");
 
-                return ParseUncompressedData(data);
+                return ParseArchive2Data(data);
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error parsing Level 2 file: {ex.Message}\n{ex.StackTrace}");
+                System.Diagnostics.Debug.WriteLine($"FATAL: Level 2 parse error: {ex.Message}\n{ex.StackTrace}");
                 return null;
             }
         }
@@ -42,7 +39,7 @@ namespace OhioNewsWeather.WeatherApp.Services
         {
             if (data.Length < 2) return data;
 
-            // Check for gzip (1f 8b)
+            // Check for gzip (0x1f 0x8b)
             if (data[0] == 0x1f && data[1] == 0x8b)
             {
                 System.Diagnostics.Debug.WriteLine("Detected gzip compression");
@@ -61,7 +58,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                 }
             }
 
-            // Check for bzip2 (42 5A - "BZ")
+            // Check for bzip2 (0x42 0x5A - "BZ")
             if (data[0] == 0x42 && data[1] == 0x5A)
             {
                 System.Diagnostics.Debug.WriteLine("Detected bzip2 compression");
@@ -85,145 +82,207 @@ namespace OhioNewsWeather.WeatherApp.Services
             return data;
         }
 
-        private Level2Data ParseUncompressedData(byte[] data)
+        private Level2Data ParseArchive2Data(byte[] data)
         {
             using var stream = new MemoryStream(data);
             using var reader = new BigEndianBinaryReader(stream);
 
-            var level2Data = new Level2Data
-            {
-                Sweeps = new List<Level2Sweep>()
-            };
+            var level2Data = new Level2Data { Sweeps = new List<Level2Sweep>() };
 
             try
             {
-                // Read Archive II volume header (24 bytes)
-                string volumeHeader = new string(reader.ReadChars(9));
-                System.Diagnostics.Debug.WriteLine($"Volume header: {volumeHeader}");
+                // Read Archive II header (24 bytes)
+                byte[] headerBytes = reader.ReadBytes(9);
+                string header = System.Text.Encoding.ASCII.GetString(headerBytes).TrimEnd('\0');
+                System.Diagnostics.Debug.WriteLine($"Archive II Header: '{header}'");
 
-                // Skip rest of volume header
-                stream.Position = VOLUME_HEADER_SIZE;
+                // Skip rest of header
+                stream.Position = ARCHIVE2_HEADER_SIZE;
 
-                // Read LDM compressed records
-                var currentSweep = new Level2Sweep { Radials = new List<Level2Radial>() };
-                float currentElevation = -999f;
-                int radialCount = 0;
+                // Track sweeps by elevation
+                var sweepsByElevation = new Dictionary<float, Level2Sweep>();
 
-                while (stream.Position + LDM_RECORD_SIZE <= stream.Length)
+                int messageCount = 0;
+                int validRadials = 0;
+
+                // Parse messages
+                while (stream.Position + MESSAGE_SIZE <= stream.Length)
                 {
-                    long recordStart = stream.Position;
+                    long messageStart = stream.Position;
 
                     try
                     {
-                        // Skip LDM header if present (12 bytes with -1 size means control word)
-                        short size = reader.ReadInt16();
+                        // Read CTM header (12 bytes)
+                        // Bytes 0-3: Size (negative means metadata)
+                        stream.Position = messageStart;
+                        byte[] ctmSizeBytes = reader.ReadBytes(4);
+                        Array.Reverse(ctmSizeBytes); // Big endian
+                        int ctmSize = BitConverter.ToInt32(ctmSizeBytes, 0);
 
-                        if (size == -1)
+                        // Skip CTM header
+                        stream.Position = messageStart + CTM_HEADER_SIZE;
+
+                        // Read message header (starts at byte 12 from record start)
+                        // Bytes 0-11: RDA status, etc.
+                        // Byte 12-13: Message size in halfwords
+                        // Byte 14: RDA channel
+                        // Byte 15: Message type
+                        stream.Position = messageStart + CTM_HEADER_SIZE;
+
+                        // Read first 16 bytes of message
+                        byte[] msgHeaderBytes = reader.ReadBytes(16);
+
+                        byte messageType = msgHeaderBytes[15];
+
+                        if (messageType == 31) // Digital Radar Data
                         {
-                            // LDM control word, skip
-                            stream.Position = recordStart + 12;
-                            size = reader.ReadInt16();
-                        }
-                        else
-                        {
-                            stream.Position = recordStart;
-                        }
+                            messageCount++;
 
-                        // Read message header
-                        stream.Position = recordStart + 12; // Skip to message start
-                        if (stream.Position + MESSAGE_HEADER_SIZE > stream.Length) break;
+                            // Parse Message 31 starting from byte 12 of the record
+                            stream.Position = messageStart + CTM_HEADER_SIZE;
+                            var radial = ParseMessage31Radial(reader);
 
-                        byte[] messageHeader = reader.ReadBytes(MESSAGE_HEADER_SIZE);
-
-                        // Message type is at byte 15 (0-indexed)
-                        byte messageType = messageHeader[15];
-
-                        if (messageType == 31) // Digital Radar Data (Message 31)
-                        {
-                            // Parse Message 31
-                            stream.Position = recordStart + 12; // Reset to message start
-                            var radial = ParseMessage31(reader);
-
-                            if (radial != null)
+                            if (radial != null && radial.ReflectivityGates != null && radial.ReflectivityGates.Count > 0)
                             {
-                                // Check if we're starting a new elevation sweep
-                                if (Math.Abs(radial.Elevation - currentElevation) > 0.5f)
-                                {
-                                    // Save previous sweep if it has data
-                                    if (currentSweep.Radials.Count > 0)
-                                    {
-                                        currentSweep.ElevationAngle = currentElevation;
-                                        level2Data.Sweeps.Add(currentSweep);
-                                        System.Diagnostics.Debug.WriteLine($"Completed sweep at {currentElevation:F1}° with {currentSweep.Radials.Count} radials");
-                                    }
+                                validRadials++;
 
-                                    // Start new sweep
-                                    currentSweep = new Level2Sweep { Radials = new List<Level2Radial>() };
-                                    currentElevation = radial.Elevation;
-                                    radialCount = 0;
+                                // Group by elevation angle (rounded to 0.1 degree)
+                                float elevKey = (float)Math.Round(radial.Elevation, 1);
+
+                                if (!sweepsByElevation.ContainsKey(elevKey))
+                                {
+                                    sweepsByElevation[elevKey] = new Level2Sweep
+                                    {
+                                        ElevationAngle = elevKey,
+                                        Radials = new List<Level2Radial>()
+                                    };
                                 }
 
-                                currentSweep.Radials.Add(radial);
-                                radialCount++;
+                                sweepsByElevation[elevKey].Radials.Add(radial);
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"Error reading record at position {recordStart}: {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine($"Error parsing message at {messageStart}: {ex.Message}");
                     }
 
-                    // Move to next LDM record
-                    stream.Position = recordStart + LDM_RECORD_SIZE;
+                    // Move to next message (2432 bytes each)
+                    stream.Position = messageStart + MESSAGE_SIZE;
                 }
 
-                // Add final sweep
-                if (currentSweep.Radials.Count > 0)
+                // Convert to list and sort by elevation
+                foreach (var kvp in sweepsByElevation)
                 {
-                    currentSweep.ElevationAngle = currentElevation;
-                    level2Data.Sweeps.Add(currentSweep);
-                    System.Diagnostics.Debug.WriteLine($"Completed final sweep at {currentElevation:F1}° with {currentSweep.Radials.Count} radials");
+                    level2Data.Sweeps.Add(kvp.Value);
+                    System.Diagnostics.Debug.WriteLine($"Sweep at {kvp.Key:F1}° has {kvp.Value.Radials.Count} radials");
                 }
 
-                System.Diagnostics.Debug.WriteLine($"Parsed {level2Data.Sweeps.Count} total sweeps");
+                level2Data.Sweeps.Sort((a, b) => a.ElevationAngle.CompareTo(b.ElevationAngle));
+
+                System.Diagnostics.Debug.WriteLine($"=== Parse Complete: {messageCount} messages, {validRadials} valid radials, {level2Data.Sweeps.Count} sweeps ===");
+
                 return level2Data.Sweeps.Count > 0 ? level2Data : null;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error in ParseUncompressedData: {ex.Message}\n{ex.StackTrace}");
+                System.Diagnostics.Debug.WriteLine($"Error in ParseArchive2Data: {ex.Message}\n{ex.StackTrace}");
                 return null;
             }
         }
 
-        private Level2Radial ParseMessage31(BigEndianBinaryReader reader)
+        private Level2Radial ParseMessage31Radial(BigEndianBinaryReader reader)
         {
+            long msgStart = reader.BaseStream.Position;
+
             try
             {
-                long messageStart = reader.BaseStream.Position;
+                // Message 31 Header (100 bytes total)
+                // Bytes 0-11: RDA status header
+                reader.ReadBytes(12); // Skip RDA status
 
-                // Skip to radial header (starts at byte 28 from message start)
-                reader.BaseStream.Position = messageStart + 28;
+                // Bytes 12-13: Message date (days since 1/1/1970)
+                ushort dateJulian = reader.ReadUInt16();
 
-                // Read azimuth angle (2 bytes, 0.01 degree resolution)
-                float azimuth = reader.ReadUInt16() * 0.01f;
+                // Bytes 14-17: Message time (ms since midnight)
+                uint timeMs = reader.ReadUInt32();
 
-                // Read azimuth resolution (2 bytes)
-                ushort azimuthRes = reader.ReadUInt16();
+                // Bytes 18-19: Number of message segments
+                ushort numSegments = reader.ReadUInt16();
 
-                // Read radial status (1 byte)
+                // Bytes 20-21: Message segment number
+                ushort segmentNum = reader.ReadUInt16();
+
+                // === RADIAL HEADER (starts at byte 28) ===
+                reader.BaseStream.Position = msgStart + 28;
+
+                // Bytes 28-31: Collection time (ms past midnight)
+                uint collectionTime = reader.ReadUInt32();
+
+                // Bytes 32-33: Modified Julian date
+                ushort julianDate = reader.ReadUInt16();
+
+                // Bytes 34-35: Unambiguous range (tenths of km)
+                ushort unambigRange = reader.ReadUInt16();
+
+                // Bytes 36-37: Azimuth angle (hundredths of degrees)
+                ushort azimuthRaw = reader.ReadUInt16();
+                float azimuth = azimuthRaw * 0.01f;
+
+                // Bytes 38: Azimuth number
+                byte azimuthNumber = reader.ReadByte();
+
+                // Bytes 39: Radial status
                 byte radialStatus = reader.ReadByte();
 
-                // Read elevation angle (1 byte, 0.01 degree resolution, offset by -127)
-                reader.BaseStream.Position = messageStart + 33;
-                float elevation = reader.ReadByte() * 0.01f - 127f;
+                // Bytes 40-41: Elevation angle (hundredths of degrees)
+                ushort elevationRaw = reader.ReadUInt16();
+                float elevation = elevationRaw * 0.01f;
 
-                // Skip ahead to data moment pointers (byte 44)
-                reader.BaseStream.Position = messageStart + 44;
+                // Bytes 42: Elevation number
+                byte elevationNumber = reader.ReadByte();
 
-                // Read data block pointers
+                // Bytes 43-44: Surveillance range (tenths of km)
+                reader.ReadUInt16();
+
+                // Bytes 45-46: Doppler range
+                reader.ReadUInt16();
+
+                // Bytes 47-48: Surveillance range sample interval
+                reader.ReadUInt16();
+
+                // Bytes 49-50: Doppler range sample interval
+                reader.ReadUInt16();
+
+                // Bytes 51: Number of surveillance bins
+                byte numSurveillanceBins = reader.ReadByte();
+
+                // Bytes 52: Number of Doppler bins
+                byte numDopplerBins = reader.ReadByte();
+
+                // Bytes 53: Cut sector number
+                reader.ReadByte();
+
+                // Bytes 54-57: Calibration constant
+                reader.ReadSingle();
+
+                // Bytes 58-61: Surveillance pointer (offset to REF data block)
                 uint refPointer = reader.ReadUInt32();
+
+                // Bytes 62-65: Velocity pointer
                 uint velPointer = reader.ReadUInt32();
+
+                // Bytes 66-69: Spectrum width pointer
                 uint swPointer = reader.ReadUInt32();
+
+                // Bytes 70-73: Doppler resolution
+                reader.ReadUInt32();
+
+                // Bytes 74-77: VCP
+                reader.ReadUInt32();
+
+                // Skip to byte 100 (rest of header)
+                reader.BaseStream.Position = msgStart + 100;
 
                 var radial = new Level2Radial
                 {
@@ -234,74 +293,95 @@ namespace OhioNewsWeather.WeatherApp.Services
                     SpectrumWidthGates = new List<float>()
                 };
 
-                // Parse reflectivity data block
-                if (refPointer > 0)
+                // Parse data blocks
+                if (refPointer > 0 && refPointer < MESSAGE_SIZE)
                 {
-                    reader.BaseStream.Position = messageStart + refPointer;
-                    ParseDataMoment(reader, radial.ReflectivityGates, "REF");
+                    reader.BaseStream.Position = msgStart + refPointer;
+                    ParseDataBlock(reader, radial.ReflectivityGates);
                 }
 
-                // Parse velocity data block
-                if (velPointer > 0)
+                if (velPointer > 0 && velPointer < MESSAGE_SIZE)
                 {
-                    reader.BaseStream.Position = messageStart + velPointer;
-                    ParseDataMoment(reader, radial.VelocityGates, "VEL");
+                    reader.BaseStream.Position = msgStart + velPointer;
+                    ParseDataBlock(reader, radial.VelocityGates);
                 }
 
                 return radial;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error parsing Message 31: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Error parsing Message 31 radial: {ex.Message}");
                 return null;
             }
         }
 
-        private void ParseDataMoment(BigEndianBinaryReader reader, List<float> gates, string momentType)
+        private void ParseDataBlock(BigEndianBinaryReader reader, List<float> gates)
         {
             try
             {
-                // Read data moment header
-                uint blockType = reader.ReadUInt32();
-                string blockName = new string(reader.ReadChars(3));
-                reader.ReadByte(); // Reserved
+                long blockStart = reader.BaseStream.Position;
 
+                // Data block header
+                // Bytes 0-3: Block type (e.g., "DREF", "DVEL")
+                string blockType = new string(reader.ReadChars(1));
+                reader.ReadBytes(3); // Rest of block ID
+
+                // Bytes 4-7: Reserved
+                reader.ReadUInt32();
+
+                // Bytes 8-9: Number of gates
                 ushort numGates = reader.ReadUInt16();
-                float firstGateRange = reader.ReadUInt16() * 0.001f; // meters to km
-                float gateSpacing = reader.ReadUInt16() * 0.001f; // meters to km
+
+                // Bytes 10-11: First gate range (meters)
+                ushort firstGate = reader.ReadUInt16();
+
+                // Bytes 12-13: Gate size (meters)
+                ushort gateSize = reader.ReadUInt16();
+
+                // Bytes 14-15: RF threshold
                 ushort rfThreshold = reader.ReadUInt16();
+
+                // Bytes 16-17: SNR threshold
                 ushort snrThreshold = reader.ReadUInt16();
+
+                // Bytes 18: Control flags
                 byte controlFlags = reader.ReadByte();
+
+                // Bytes 19: Data word size (bits)
                 byte wordSize = reader.ReadByte();
+
+                // Bytes 20-23: Scale
                 float scale = reader.ReadSingle();
+
+                // Bytes 24-27: Offset
                 float offset = reader.ReadSingle();
 
-                // Read gate data
+                // Read gate data (starts at byte 28 of data block)
                 for (int i = 0; i < numGates; i++)
                 {
-                    byte value = reader.ReadByte();
+                    byte rawValue = reader.ReadByte();
 
-                    if (value == 0 || value == 1) // No data or range folded
+                    if (rawValue == 0 || rawValue == 1) // Below threshold or range folded
                     {
                         gates.Add(float.NaN);
                     }
                     else
                     {
-                        // Apply scaling: (value - offset) / scale
-                        float scaledValue = (value - offset) / scale;
-                        gates.Add(scaledValue);
+                        // Apply scaling formula from ICD
+                        float value = (rawValue - offset) / scale;
+                        gates.Add(value);
                     }
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error parsing data moment {momentType}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Error parsing data block: {ex.Message}");
             }
         }
     }
 
     /// <summary>
-    /// Helper class for reading big-endian binary data (NEXRAD format)
+    /// Big-endian binary reader for NEXRAD data
     /// </summary>
     public class BigEndianBinaryReader : BinaryReader
     {
@@ -343,32 +423,23 @@ namespace OhioNewsWeather.WeatherApp.Services
         }
     }
 
-    /// <summary>
-    /// Represents parsed Level 2 radar data
-    /// </summary>
     public class Level2Data
     {
         public List<Level2Sweep> Sweeps { get; set; }
     }
 
-    /// <summary>
-    /// Represents one elevation sweep
-    /// </summary>
     public class Level2Sweep
     {
         public float ElevationAngle { get; set; }
         public List<Level2Radial> Radials { get; set; }
     }
 
-    /// <summary>
-    /// Represents one radial beam with moment data
-    /// </summary>
     public class Level2Radial
     {
-        public float Azimuth { get; set; } // Degrees
-        public float Elevation { get; set; } // Degrees
-        public List<float> ReflectivityGates { get; set; } // dBZ values
-        public List<float> VelocityGates { get; set; } // m/s values
-        public List<float> SpectrumWidthGates { get; set; } // m/s values
+        public float Azimuth { get; set; }
+        public float Elevation { get; set; }
+        public List<float> ReflectivityGates { get; set; }
+        public List<float> VelocityGates { get; set; }
+        public List<float> SpectrumWidthGates { get; set; }
     }
 }
