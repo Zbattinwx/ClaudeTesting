@@ -113,6 +113,21 @@ namespace OhioNewsWeather.WeatherApp.Services
                 // Skip rest of header
                 stream.Position = ARCHIVE2_HEADER_SIZE;
 
+                // Check what's at position 24 (after volume header)
+                byte[] firstBytesAfterHeader = new byte[10];
+                stream.Read(firstBytesAfterHeader, 0, 10);
+                stream.Position = ARCHIVE2_HEADER_SIZE; // Reset
+                System.Diagnostics.Debug.Write($"First 10 bytes at position {ARCHIVE2_HEADER_SIZE}: ");
+                for (int i = 0; i < 10; i++) System.Diagnostics.Debug.Write($"{firstBytesAfterHeader[i]:X2} ");
+                System.Diagnostics.Debug.WriteLine("");
+
+                // Check if this might be a compressed record (starts with BZ or other compression signature)
+                if (firstBytesAfterHeader[0] == 0x42 && firstBytesAfterHeader[1] == 0x5A)
+                {
+                    System.Diagnostics.Debug.WriteLine("WARNING: Detected bzip2 compressed record at position 24!");
+                    System.Diagnostics.Debug.WriteLine("Files may have LDM compression structure - each record needs separate decompression");
+                }
+
                 // Track sweeps by elevation
                 var sweepsByElevation = new Dictionary<float, Level2Sweep>();
 
