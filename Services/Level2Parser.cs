@@ -533,41 +533,33 @@ namespace OhioNewsWeather.WeatherApp.Services
                 ushort cutSector = reader.ReadUInt16();
 
                 // Bytes 54-57: Elevation angle (4-byte float!)
-                float elevation = reader.ReadSingle();
+                // Read and debug the raw bytes
+                long elevPos = reader.BaseStream.Position;
+                byte[] elevBytes = reader.ReadBytes(4);
+                float elevation = BitConverter.ToSingle(elevBytes.Reverse().ToArray(), 0);
+
+                if (debugThis)
+                {
+                    System.Diagnostics.Debug.Write($"  Elevation bytes at {elevPos}: ");
+                    foreach (byte b in elevBytes) System.Diagnostics.Debug.Write($"{b:X2} ");
+                    System.Diagnostics.Debug.WriteLine($"= {elevation:F6}°");
+                }
 
                 // Bytes 58-59: Surveillance range
                 ushort survRange = reader.ReadUInt16();
 
                 // Skip to byte 100 where data block pointers typically start
-                // Read remaining bytes to get to the data pointers section
-                // The exact structure varies - let's position based on known structure
                 reader.BaseStream.Position = msgStart + 100;
 
-                // Now read data block pointers
-                // These appear around byte 100+ in the structure
-                uint refPointer = 0;
-                uint velPointer = 0;
-                uint swPointer = 0;
-
-                // Try to find data blocks by reading volume/elevation/radial blocks
-                // Volume data block
-                string volBlockType = new string(reader.ReadChars(1));
-                reader.ReadBytes(3); // Rest of block ID
-                if (volBlockType == "R" || volBlockType == "V" || volBlockType == "E")
-                {
-                    // This is a data block header, read its structure
-                    reader.BaseStream.Position = msgStart + 100;
-                }
-
-                // For now, set pointers based on typical Message 31 structure
                 // Data blocks typically start after the 100-byte header
-                refPointer = 100; // Assume REF data starts at byte 100
+                uint refPointer = 100; // Assume REF data starts at byte 100
+                uint velPointer = 0;
 
                 if (debugThis)
                 {
                     System.Diagnostics.Debug.WriteLine($"  ICAO: '{icao}'");
                     System.Diagnostics.Debug.WriteLine($"  Azimuth: {azimuth:F2}° (4-byte float at byte 40-43)");
-                    System.Diagnostics.Debug.WriteLine($"  Elevation: {elevation:F2}° (4-byte float at byte 54-57)");
+                    System.Diagnostics.Debug.WriteLine($"  Elevation: {elevation:F2}° (rounded for display)");
                     System.Diagnostics.Debug.WriteLine($"  RefPtr={refPointer} VelPtr={velPointer}");
                 }
 
