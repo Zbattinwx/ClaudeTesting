@@ -126,12 +126,29 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                     try
                     {
+                        if (messageCount < 3)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"\nMessage {messageCount + 1} at position {messageStart}");
+                            byte[] peek = new byte[20];
+                            long saved = stream.Position;
+                            stream.Read(peek, 0, 20);
+                            stream.Position = saved;
+                            System.Diagnostics.Debug.Write($"  First 20 bytes: ");
+                            for (int i = 0; i < 20; i++) System.Diagnostics.Debug.Write($"{peek[i]:X2} ");
+                            System.Diagnostics.Debug.WriteLine("");
+                        }
+
                         // Read CTM header (12 bytes)
                         // Bytes 0-3: Size (negative means metadata)
                         stream.Position = messageStart;
                         byte[] ctmSizeBytes = reader.ReadBytes(4);
                         Array.Reverse(ctmSizeBytes); // Big endian
                         int ctmSize = BitConverter.ToInt32(ctmSizeBytes, 0);
+
+                        if (messageCount < 3)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"  CTM size: {ctmSize}");
+                        }
 
                         // Skip CTM header
                         stream.Position = messageStart + CTM_HEADER_SIZE;
@@ -147,6 +164,11 @@ namespace OhioNewsWeather.WeatherApp.Services
                         byte[] msgHeaderBytes = reader.ReadBytes(16);
 
                         byte messageType = msgHeaderBytes[15];
+
+                        if (messageCount < 3)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"  Message type (byte 15): {messageType}");
+                        }
 
                         if (messageType == 31) // Digital Radar Data
                         {
