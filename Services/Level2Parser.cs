@@ -118,61 +118,32 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                 int messageCount = 0;
                 int validRadials = 0;
-                int loopIteration = 0;
 
-                System.Diagnostics.Debug.WriteLine("\n=== Checking message positions (first 10) ===");
+                System.Diagnostics.Debug.WriteLine("\n=== Parsing variable-length messages ===");
 
-                // Parse messages
-                while (stream.Position + MESSAGE_SIZE <= stream.Length)
+                // Parse messages - they are variable length!
+                while (stream.Position + 16 < stream.Length) // Need at least 16 bytes for header
                 {
                     long messageStart = stream.Position;
-                    loopIteration++;
 
                     try
                     {
-                        // Log first 10 iterations to see what positions we're checking
-                        if (loopIteration <= 10)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"\n[Iteration {loopIteration}] Position {messageStart}");
-                            byte[] peek = new byte[20];
-                            long saved = stream.Position;
-                            stream.Read(peek, 0, 20);
-                            stream.Position = saved;
-                            System.Diagnostics.Debug.Write($"  First 20 bytes: ");
-                            for (int i = 0; i < 20; i++) System.Diagnostics.Debug.Write($"{peek[i]:X2} ");
-                            System.Diagnostics.Debug.WriteLine("");
-                        }
-
-                        // Read CTM header (12 bytes)
-                        // Bytes 0-3: Size (negative means metadata)
-                        stream.Position = messageStart;
-                        byte[] ctmSizeBytes = reader.ReadBytes(4);
-                        Array.Reverse(ctmSizeBytes); // Big endian
-                        int ctmSize = BitConverter.ToInt32(ctmSizeBytes, 0);
-
-                        if (loopIteration <= 10)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"  CTM size: {ctmSize}");
-                        }
-
-                        // Skip CTM header
-                        stream.Position = messageStart + CTM_HEADER_SIZE;
-
-                        // Read message header (starts at byte 12 from record start)
+                        // Read message header (first 16 bytes)
                         // Bytes 0-11: RDA status, etc.
-                        // Byte 12-13: Message size in halfwords
+                        // Bytes 12-13: Message size in HALFWORDS (multiply by 2 for bytes)
                         // Byte 14: RDA channel
                         // Byte 15: Message type
-                        stream.Position = messageStart + CTM_HEADER_SIZE;
-
-                        // Read first 16 bytes of message
                         byte[] msgHeaderBytes = reader.ReadBytes(16);
+
+                        // Extract message size (bytes 12-13, big-endian, in halfwords)
+                        ushort messageSizeHalfwords = (ushort)((msgHeaderBytes[12] << 8) | msgHeaderBytes[13]);
+                        int messageSizeBytes = messageSizeHalfwords * 2;
 
                         byte messageType = msgHeaderBytes[15];
 
-                        if (loopIteration <= 10)
+                        if (messageCount < 10)
                         {
-                            System.Diagnostics.Debug.WriteLine($"  Message type (byte 15): {messageType}");
+                            System.Diagnostics.Debug.WriteLine($"\n[Message {messageCount + 1}] Pos: {messageStart}, Type: {messageType}, Size: {messageSizeBytes} bytes");
                         }
 
                         if (messageType == 31) // Digital Radar Data
@@ -181,11 +152,11 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                             if (messageCount <= 3)
                             {
-                                System.Diagnostics.Debug.WriteLine($"  *** FOUND MESSAGE TYPE 31 at iteration {loopIteration}, position {messageStart} ***");
+                                System.Diagnostics.Debug.WriteLine($"  *** FOUND MESSAGE TYPE 31 at position {messageStart}, size {messageSizeBytes} bytes ***");
                             }
 
-                            // Parse Message 31 starting from byte 12 of the record
-                            stream.Position = messageStart + CTM_HEADER_SIZE;
+                            // Parse Message 31 starting from beginning of this message
+                            stream.Position = messageStart;
                             var radial = ParseMessage31Radial(reader);
 
                             if (radial != null && radial.ReflectivityGates != null && radial.ReflectivityGates.Count > 0)
@@ -207,14 +178,23 @@ namespace OhioNewsWeather.WeatherApp.Services
                                 sweepsByElevation[elevKey].Radials.Add(radial);
                             }
                         }
+
+                        // Move to next message based on actual message size
+                        // Skip to next message (current position + remaining bytes in this message)
+                        long nextMessagePos = messageStart + messageSizeBytes;
+
+                        if (messageCount < 10)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"  Next message at: {nextMessagePos}");
+                        }
+
+                        stream.Position = nextMessagePos;
                     }
                     catch (Exception ex)
                     {
                         System.Diagnostics.Debug.WriteLine($"Error parsing message at {messageStart}: {ex.Message}");
+                        break; // Stop parsing on error
                     }
-
-                    // Move to next message (2432 bytes each)
-                    stream.Position = messageStart + MESSAGE_SIZE;
                 }
 
                 // Convert to list and sort by elevation
