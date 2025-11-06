@@ -91,6 +91,9 @@ namespace OhioNewsWeather.WeatherApp.Services
 
             try
             {
+                // Reset debug counter for new file
+                _debugRadialCount = 0;
+
                 // Read Archive II header (24 bytes)
                 byte[] headerBytes = reader.ReadBytes(9);
                 string header = System.Text.Encoding.ASCII.GetString(headerBytes).TrimEnd('\0');
@@ -191,12 +194,16 @@ namespace OhioNewsWeather.WeatherApp.Services
             }
         }
 
+        private static int _debugRadialCount = 0;
+
         private Level2Radial ParseMessage31Radial(BigEndianBinaryReader reader)
         {
             long msgStart = reader.BaseStream.Position;
 
             try
             {
+                bool debugThis = _debugRadialCount < 3;
+                _debugRadialCount++;
                 // Message 31 Header (100 bytes total)
                 // Bytes 0-11: RDA status header
                 reader.ReadBytes(12); // Skip RDA status
@@ -293,11 +300,24 @@ namespace OhioNewsWeather.WeatherApp.Services
                     SpectrumWidthGates = new List<float>()
                 };
 
+                // Debug: Log first radial details
+                if (debugThis)
+                {
+                    System.Diagnostics.Debug.WriteLine($"  Radial #{_debugRadialCount}: Az={azimuth:F2}° El={elevation:F2}° RefPtr={refPointer} VelPtr={velPointer}");
+                }
+
                 // Parse data blocks
                 if (refPointer > 0 && refPointer < MESSAGE_SIZE)
                 {
                     reader.BaseStream.Position = msgStart + refPointer;
-                    ParseDataBlock(reader, radial.ReflectivityGates);
+                    ParseDataBlock(reader, radial.ReflectivityGates, debugThis);
+
+                    if (debugThis)
+                        System.Diagnostics.Debug.WriteLine($"  Parsed {radial.ReflectivityGates.Count} reflectivity gates");
+                }
+                else if (debugThis)
+                {
+                    System.Diagnostics.Debug.WriteLine($"  Invalid ref pointer: {refPointer}");
                 }
 
                 if (velPointer > 0 && velPointer < MESSAGE_SIZE)
@@ -315,7 +335,7 @@ namespace OhioNewsWeather.WeatherApp.Services
             }
         }
 
-        private void ParseDataBlock(BigEndianBinaryReader reader, List<float> gates)
+        private void ParseDataBlock(BigEndianBinaryReader reader, List<float> gates, bool debug = false)
         {
             try
             {
@@ -356,7 +376,13 @@ namespace OhioNewsWeather.WeatherApp.Services
                 // Bytes 24-27: Offset
                 float offset = reader.ReadSingle();
 
+                if (debug)
+                {
+                    System.Diagnostics.Debug.WriteLine($"    DataBlock: Type={blockType} Gates={numGates} Scale={scale} Offset={offset}");
+                }
+
                 // Read gate data (starts at byte 28 of data block)
+                int validGateCount = 0;
                 for (int i = 0; i < numGates; i++)
                 {
                     byte rawValue = reader.ReadByte();
@@ -370,7 +396,13 @@ namespace OhioNewsWeather.WeatherApp.Services
                         // Apply scaling formula from ICD
                         float value = (rawValue - offset) / scale;
                         gates.Add(value);
+                        validGateCount++;
                     }
+                }
+
+                if (debug)
+                {
+                    System.Diagnostics.Debug.WriteLine($"    Valid gates: {validGateCount}/{numGates}");
                 }
             }
             catch (Exception ex)
