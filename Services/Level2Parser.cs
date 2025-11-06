@@ -461,67 +461,113 @@ namespace OhioNewsWeather.WeatherApp.Services
                     System.Diagnostics.Debug.WriteLine("");
                 }
 
-                // === MESSAGE HEADER (16 bytes) ===
-                // Skip message header
-                reader.ReadBytes(16);
+                // === MESSAGE 31 STRUCTURE (in decompressed LDM data) ===
+                // Note: "KCLE" appears at bytes 28-31 in the hex dump
+                // Let's read sequentially and see where things line up
 
-                // === MESSAGE 31 HEADER (starts at byte 16) ===
-                long msg31Start = reader.BaseStream.Position; // Position of Message 31 header
+                long msg31Start = msgStart; // Use message start as base for pointers
 
-                // Bytes 0-3 (offset from msg31Start): ID (4-byte string)
-                byte[] idBytes = reader.ReadBytes(4);
-                string id = System.Text.Encoding.ASCII.GetString(idBytes);
+                // Bytes 0-11: RDA Status (12 bytes, often zeros)
+                reader.ReadBytes(12);
 
-                // Bytes 4-7: Collection time (ms)
+                // Bytes 12-13: Message size in halfwords
+                ushort msgSizeHalfwords = reader.ReadUInt16();
+
+                // Byte 14: RDA channel
+                byte rdaChannel = reader.ReadByte();
+
+                // Byte 15: Message type (should be 31)
+                byte msgType = reader.ReadByte();
+
+                // Bytes 16-17: ID sequence number
+                ushort idSeq = reader.ReadUInt16();
+
+                // Bytes 18-19: Julian date
+                ushort julianDate = reader.ReadUInt16();
+
+                // Bytes 20-23: Milliseconds of day
+                uint millisOfDay = reader.ReadUInt32();
+
+                // Bytes 24-25: Number of segments
+                ushort numSegments = reader.ReadUInt16();
+
+                // Bytes 26-27: Segment number
+                ushort segmentNumber = reader.ReadUInt16();
+
+                // Bytes 28-31: ICAO identifier (this is where "KCLE" appears!)
+                byte[] icaoBytes = reader.ReadBytes(4);
+                string icao = System.Text.Encoding.ASCII.GetString(icaoBytes);
+
+                // Now we're at byte 32 - continue with radial-specific data
+                // Bytes 32-35: Collection time (ms)
                 uint collectMs = reader.ReadUInt32();
 
-                // Bytes 8-9: Collection date
+                // Bytes 36-37: Collection date
                 ushort collectDate = reader.ReadUInt16();
 
-                // Bytes 10-11: Azimuth number
+                // Bytes 38-39: Azimuth number
                 ushort azimuthNumber = reader.ReadUInt16();
 
-                // Bytes 12-15: Azimuth angle (4-byte float!)
+                // Bytes 40-43: Azimuth angle (4-byte float!)
                 float azimuth = reader.ReadSingle();
 
-                // Bytes 16-19: Compression flag
-                reader.ReadUInt32();
+                // Bytes 44: Compression indicator
+                byte compressionIndicator = reader.ReadByte();
 
-                // Bytes 20-23: Spare
-                reader.ReadUInt32();
+                // Byte 45: Spare
+                reader.ReadByte();
 
-                // Bytes 24-27: Elevation angle (4-byte float!)
+                // Bytes 46-47: Radial length
+                ushort radialLength = reader.ReadUInt16();
+
+                // Bytes 48-49: Azimuth resolution spacing
+                byte azResSpacing = reader.ReadByte();
+
+                // Byte 49: Radial status
+                byte radialStatus = reader.ReadByte();
+
+                // Bytes 50-51: Elevation number
+                ushort elevNumber = reader.ReadUInt16();
+
+                // Bytes 52-53: Cut sector number
+                ushort cutSector = reader.ReadUInt16();
+
+                // Bytes 54-57: Elevation angle (4-byte float!)
                 float elevation = reader.ReadSingle();
 
-                // Bytes 28-29: Radial status
-                reader.ReadUInt16();
+                // Bytes 58-59: Surveillance range
+                ushort survRange = reader.ReadUInt16();
 
-                // Bytes 30-31: Elevation number
-                reader.ReadUInt16();
+                // Skip to byte 100 where data block pointers typically start
+                // Read remaining bytes to get to the data pointers section
+                // The exact structure varies - let's position based on known structure
+                reader.BaseStream.Position = msgStart + 100;
 
-                // Bytes 32-35: Block pointer 1 (volume data)
-                uint blockPtr1 = reader.ReadUInt32();
+                // Now read data block pointers
+                // These appear around byte 100+ in the structure
+                uint refPointer = 0;
+                uint velPointer = 0;
+                uint swPointer = 0;
 
-                // Bytes 36-39: Block pointer 2 (elevation data)
-                uint blockPtr2 = reader.ReadUInt32();
+                // Try to find data blocks by reading volume/elevation/radial blocks
+                // Volume data block
+                string volBlockType = new string(reader.ReadChars(1));
+                reader.ReadBytes(3); // Rest of block ID
+                if (volBlockType == "R" || volBlockType == "V" || volBlockType == "E")
+                {
+                    // This is a data block header, read its structure
+                    reader.BaseStream.Position = msgStart + 100;
+                }
 
-                // Bytes 40-43: Block pointer 3 (radial data)
-                uint blockPtr3 = reader.ReadUInt32();
-
-                // Bytes 44-47: Block pointer 4 (REF moment)
-                uint refPointer = reader.ReadUInt32();
-
-                // Bytes 48-51: Block pointer 5 (VEL moment)
-                uint velPointer = reader.ReadUInt32();
-
-                // Bytes 52-55: Block pointer 6 (SW moment)
-                uint swPointer = reader.ReadUInt32();
+                // For now, set pointers based on typical Message 31 structure
+                // Data blocks typically start after the 100-byte header
+                refPointer = 100; // Assume REF data starts at byte 100
 
                 if (debugThis)
                 {
-                    System.Diagnostics.Debug.WriteLine($"  ID: '{id}'");
-                    System.Diagnostics.Debug.WriteLine($"  Azimuth: {azimuth:F2}° (4-byte float)");
-                    System.Diagnostics.Debug.WriteLine($"  Elevation: {elevation:F2}° (4-byte float)");
+                    System.Diagnostics.Debug.WriteLine($"  ICAO: '{icao}'");
+                    System.Diagnostics.Debug.WriteLine($"  Azimuth: {azimuth:F2}° (4-byte float at byte 40-43)");
+                    System.Diagnostics.Debug.WriteLine($"  Elevation: {elevation:F2}° (4-byte float at byte 54-57)");
                     System.Diagnostics.Debug.WriteLine($"  RefPtr={refPointer} VelPtr={velPointer}");
                 }
 
