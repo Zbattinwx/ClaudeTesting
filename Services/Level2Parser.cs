@@ -327,9 +327,11 @@ namespace OhioNewsWeather.WeatherApp.Services
                         }
 
                         // Parse messages at fixed 2432-byte intervals
+                        // Each slot has a 12-byte CTM header followed by the actual message
                         for (int msgNum = 0; msgNum < maxMessages; msgNum++)
                         {
-                            long messageStart = msgNum * MESSAGE_SIZE;
+                            long slotStart = msgNum * MESSAGE_SIZE;
+                            long messageStart = slotStart + CTM_HEADER_SIZE; // Skip 12-byte CTM header
                             msgStream.Position = messageStart;
 
                             try
@@ -338,7 +340,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                                 if (msgStream.Position + 16 > msgStream.Length)
                                     break;
 
-                                // Read message header (first 16 bytes)
+                                // Read message header (first 16 bytes of actual message, after CTM header)
                                 byte[] msgHeaderBytes = msgReader.ReadBytes(16);
 
                                 // Extract message size (bytes 12-13, in halfwords)
@@ -354,7 +356,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                                 // Log first few messages of first few records
                                 if (recordNum <= 2 && messagesInRecord < 5)
                                 {
-                                    System.Diagnostics.Debug.WriteLine($"    Msg slot {msgNum}: Type={messageType}, Size={messageSizeBytes} bytes");
+                                    System.Diagnostics.Debug.WriteLine($"    Msg slot {msgNum}: Type={messageType}, Size={messageSizeBytes} bytes (at offset {messageStart})");
                                 }
 
                                 if (messageType == 31) // Digital Radar Data
@@ -367,7 +369,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                                         System.Diagnostics.Debug.WriteLine($"    *** Message Type 31 at slot {msgNum}, offset {messageStart}, size {messageSizeBytes} bytes ***");
                                     }
 
-                                    // Parse Message 31 starting from beginning of this message
+                                    // Parse Message 31 starting from actual message (after CTM header)
                                     msgStream.Position = messageStart;
                                     var radial = ParseMessage31Radial(msgReader, messageSizeBytes);
 
