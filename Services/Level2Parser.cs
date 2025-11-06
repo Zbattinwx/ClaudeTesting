@@ -461,98 +461,69 @@ namespace OhioNewsWeather.WeatherApp.Services
                     System.Diagnostics.Debug.WriteLine("");
                 }
 
-                // Message 31 Header (100 bytes total)
-                // Bytes 0-11: RDA status header
-                reader.ReadBytes(12); // Skip RDA status
+                // === MESSAGE HEADER (16 bytes) ===
+                // Skip message header
+                reader.ReadBytes(16);
 
-                // Bytes 12-13: Message date (days since 1/1/1970)
-                ushort dateJulian = reader.ReadUInt16();
+                // === MESSAGE 31 HEADER (starts at byte 16) ===
+                long msg31Start = reader.BaseStream.Position; // Position of Message 31 header
 
-                // Bytes 14-17: Message time (ms since midnight)
-                uint timeMs = reader.ReadUInt32();
+                // Bytes 0-3 (offset from msg31Start): ID (4-byte string)
+                byte[] idBytes = reader.ReadBytes(4);
+                string id = System.Text.Encoding.ASCII.GetString(idBytes);
 
-                // Bytes 18-19: Number of message segments
-                ushort numSegments = reader.ReadUInt16();
+                // Bytes 4-7: Collection time (ms)
+                uint collectMs = reader.ReadUInt32();
 
-                // Bytes 20-21: Message segment number
-                ushort segmentNum = reader.ReadUInt16();
+                // Bytes 8-9: Collection date
+                ushort collectDate = reader.ReadUInt16();
 
-                // === RADIAL HEADER (starts at byte 28) ===
-                reader.BaseStream.Position = msgStart + 28;
+                // Bytes 10-11: Azimuth number
+                ushort azimuthNumber = reader.ReadUInt16();
 
-                // Bytes 28-31: Collection time (ms past midnight)
-                uint collectionTime = reader.ReadUInt32();
+                // Bytes 12-15: Azimuth angle (4-byte float!)
+                float azimuth = reader.ReadSingle();
 
-                // Bytes 32-33: Modified Julian date
-                ushort julianDate = reader.ReadUInt16();
+                // Bytes 16-19: Compression flag
+                reader.ReadUInt32();
 
-                // Bytes 34-35: Unambiguous range (tenths of km)
-                ushort unambigRange = reader.ReadUInt16();
+                // Bytes 20-23: Spare
+                reader.ReadUInt32();
 
-                // Bytes 36-37: Azimuth angle (hundredths of degrees)
-                ushort azimuthRaw = reader.ReadUInt16();
-                float azimuth = azimuthRaw * 0.01f;
+                // Bytes 24-27: Elevation angle (4-byte float!)
+                float elevation = reader.ReadSingle();
 
-                // Bytes 38: Azimuth number
-                byte azimuthNumber = reader.ReadByte();
+                // Bytes 28-29: Radial status
+                reader.ReadUInt16();
 
-                // Bytes 39: Radial status
-                byte radialStatus = reader.ReadByte();
+                // Bytes 30-31: Elevation number
+                reader.ReadUInt16();
 
-                // Bytes 40-41: Elevation angle (hundredths of degrees)
-                ushort elevationRaw = reader.ReadUInt16();
-                float elevation = elevationRaw * 0.01f;
+                // Bytes 32-35: Block pointer 1 (volume data)
+                uint blockPtr1 = reader.ReadUInt32();
+
+                // Bytes 36-39: Block pointer 2 (elevation data)
+                uint blockPtr2 = reader.ReadUInt32();
+
+                // Bytes 40-43: Block pointer 3 (radial data)
+                uint blockPtr3 = reader.ReadUInt32();
+
+                // Bytes 44-47: Block pointer 4 (REF moment)
+                uint refPointer = reader.ReadUInt32();
+
+                // Bytes 48-51: Block pointer 5 (VEL moment)
+                uint velPointer = reader.ReadUInt32();
+
+                // Bytes 52-55: Block pointer 6 (SW moment)
+                uint swPointer = reader.ReadUInt32();
 
                 if (debugThis)
                 {
-                    System.Diagnostics.Debug.WriteLine($"  Azimuth raw: {azimuthRaw} = {azimuth:F2}° (at byte 36-37)");
-                    System.Diagnostics.Debug.WriteLine($"  Elevation raw: {elevationRaw} = {elevation:F2}° (at byte 40-41)");
+                    System.Diagnostics.Debug.WriteLine($"  ID: '{id}'");
+                    System.Diagnostics.Debug.WriteLine($"  Azimuth: {azimuth:F2}° (4-byte float)");
+                    System.Diagnostics.Debug.WriteLine($"  Elevation: {elevation:F2}° (4-byte float)");
+                    System.Diagnostics.Debug.WriteLine($"  RefPtr={refPointer} VelPtr={velPointer}");
                 }
-
-                // Bytes 42: Elevation number
-                byte elevationNumber = reader.ReadByte();
-
-                // Bytes 43-44: Surveillance range (tenths of km)
-                reader.ReadUInt16();
-
-                // Bytes 45-46: Doppler range
-                reader.ReadUInt16();
-
-                // Bytes 47-48: Surveillance range sample interval
-                reader.ReadUInt16();
-
-                // Bytes 49-50: Doppler range sample interval
-                reader.ReadUInt16();
-
-                // Bytes 51: Number of surveillance bins
-                byte numSurveillanceBins = reader.ReadByte();
-
-                // Bytes 52: Number of Doppler bins
-                byte numDopplerBins = reader.ReadByte();
-
-                // Bytes 53: Cut sector number
-                reader.ReadByte();
-
-                // Bytes 54-57: Calibration constant
-                reader.ReadSingle();
-
-                // Bytes 58-61: Surveillance pointer (offset to REF data block)
-                uint refPointer = reader.ReadUInt32();
-
-                // Bytes 62-65: Velocity pointer
-                uint velPointer = reader.ReadUInt32();
-
-                // Bytes 66-69: Spectrum width pointer
-                uint swPointer = reader.ReadUInt32();
-
-                // Bytes 70-73: Doppler resolution
-                reader.ReadUInt32();
-
-                // Bytes 74-77: VCP
-                reader.ReadUInt32();
-
-                // Skip to byte 100 (rest of header)
-                reader.BaseStream.Position = msgStart + 100;
 
                 var radial = new Level2Radial
                 {
@@ -563,19 +534,12 @@ namespace OhioNewsWeather.WeatherApp.Services
                     SpectrumWidthGates = new List<float>()
                 };
 
-                // Debug: Log first radial details
-                if (debugThis)
-                {
-                    System.Diagnostics.Debug.WriteLine($"  Radial #{_debugRadialCount}: Az={azimuth:F2}° El={elevation:F2}° RefPtr={refPointer} VelPtr={velPointer}");
-                }
-
-                // Parse data blocks
-                // Use messageSize for validation if provided, otherwise use a large value
+                // Parse data blocks - pointers are relative to msg31Start
                 int maxPointer = messageSize > 0 ? messageSize : 100000;
 
                 if (refPointer > 0 && refPointer < maxPointer)
                 {
-                    reader.BaseStream.Position = msgStart + refPointer;
+                    reader.BaseStream.Position = msg31Start + refPointer;
                     ParseDataBlock(reader, radial.ReflectivityGates, debugThis);
 
                     if (debugThis)
@@ -588,7 +552,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                 if (velPointer > 0 && velPointer < maxPointer)
                 {
-                    reader.BaseStream.Position = msgStart + velPointer;
+                    reader.BaseStream.Position = msg31Start + velPointer;
                     ParseDataBlock(reader, radial.VelocityGates);
                 }
 
