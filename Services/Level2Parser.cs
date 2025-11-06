@@ -318,10 +318,13 @@ namespace OhioNewsWeather.WeatherApp.Services
                         using var msgReader = new BigEndianBinaryReader(msgStream);
 
                         int messagesInRecord = 0;
+                        int maxIterations = 1000; // Safety limit
+                        int iterations = 0;
 
-                        while (msgStream.Position + 16 < msgStream.Length)
+                        while (msgStream.Position + 16 < msgStream.Length && iterations < maxIterations)
                         {
                             long messageStart = msgStream.Position;
+                            iterations++;
 
                             try
                             {
@@ -334,6 +337,22 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                                 byte messageType = msgHeaderBytes[15];
 
+                                // Log first few messages of first few records to see what we're finding
+                                if (recordNum <= 2 && messagesInRecord < 5)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"    Msg {messagesInRecord + 1} at offset {messageStart}: Type={messageType}, Size={messageSizeBytes} bytes");
+                                }
+
+                                // Validate message size
+                                if (messageSizeBytes <= 0 || messageSizeBytes > decompressedData.Length)
+                                {
+                                    if (recordNum <= 2)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine($"    Invalid message size {messageSizeBytes}, stopping record parse");
+                                    }
+                                    break;
+                                }
+
                                 if (messageType == 31) // Digital Radar Data
                                 {
                                     totalMessages++;
@@ -341,7 +360,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                                     if (totalMessages <= 3 && recordNum <= 3)
                                     {
-                                        System.Diagnostics.Debug.WriteLine($"    Message Type 31 at offset {messageStart}, size {messageSizeBytes} bytes");
+                                        System.Diagnostics.Debug.WriteLine($"    *** Message Type 31 at offset {messageStart}, size {messageSizeBytes} bytes ***");
                                     }
 
                                     // Parse Message 31 starting from beginning of this message
@@ -369,7 +388,16 @@ namespace OhioNewsWeather.WeatherApp.Services
                                 }
 
                                 // Move to next message
-                                msgStream.Position = messageStart + messageSizeBytes;
+                                long nextMessagePos = messageStart + messageSizeBytes;
+
+                                // Sanity check - make sure we're advancing
+                                if (nextMessagePos <= messageStart)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"    ERROR: Next position {nextMessagePos} <= current {messageStart}, breaking to prevent infinite loop");
+                                    break;
+                                }
+
+                                msgStream.Position = nextMessagePos;
                             }
                             catch (Exception ex)
                             {
@@ -378,9 +406,14 @@ namespace OhioNewsWeather.WeatherApp.Services
                             }
                         }
 
+                        if (iterations >= maxIterations)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"  WARNING: Hit max iterations ({maxIterations}) for record {recordNum}");
+                        }
+
                         if (recordNum <= 3)
                         {
-                            System.Diagnostics.Debug.WriteLine($"  Found {messagesInRecord} Message 31 records in this LDM record");
+                            System.Diagnostics.Debug.WriteLine($"  Processed {iterations} messages, found {messagesInRecord} Message 31 records in this LDM record");
                         }
                     }
                     catch (Exception ex)
