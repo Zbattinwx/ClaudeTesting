@@ -256,38 +256,31 @@ namespace OhioNewsWeather.WeatherApp.Services
                 System.Diagnostics.Debug.WriteLine("\n=== Processing LDM compressed records ===");
 
                 // Process each LDM compressed record
-                while (stream.Position + CTM_HEADER_SIZE < stream.Length)
+                while (stream.Position + 4 < stream.Length)
                 {
                     long recordStart = stream.Position;
                     recordNum++;
 
                     try
                     {
-                        // Read CTM header (12 bytes)
-                        // Bytes 0-3: Size (big-endian signed int, negative means size in bytes including CTM header)
+                        // Read record size (4 bytes, big-endian)
                         byte[] sizeBytes = reader.ReadBytes(4);
                         Array.Reverse(sizeBytes); // Convert to big-endian
                         int recordSize = BitConverter.ToInt32(sizeBytes, 0);
 
-                        // Skip rest of CTM header (8 bytes)
-                        reader.ReadBytes(8);
-
-                        // Calculate compressed data size
-                        int compressedSize;
-                        if (recordSize < 0)
-                        {
-                            // Size includes CTM header
-                            compressedSize = -recordSize - CTM_HEADER_SIZE;
-                        }
-                        else
-                        {
-                            // Size is just the compressed data
-                            compressedSize = recordSize;
-                        }
+                        // The size can be negative (indicating it includes some overhead)
+                        // Use absolute value
+                        int compressedSize = Math.Abs(recordSize);
 
                         if (recordNum <= 3)
                         {
-                            System.Diagnostics.Debug.WriteLine($"\n[Record {recordNum}] Pos: {recordStart}, Compressed size: {compressedSize} bytes");
+                            System.Diagnostics.Debug.WriteLine($"\n[Record {recordNum}] Pos: {recordStart}, Size field: {recordSize}, Compressed size: {compressedSize} bytes");
+
+                            // Peek at first 4 bytes of compressed data to verify BZ signature
+                            long peekPos = stream.Position;
+                            byte[] peek = reader.ReadBytes(4);
+                            stream.Position = peekPos;
+                            System.Diagnostics.Debug.WriteLine($"  First 4 bytes: {peek[0]:X2} {peek[1]:X2} {peek[2]:X2} {peek[3]:X2} = '{(char)peek[0]}{(char)peek[1]}{(char)peek[2]}{(char)peek[3]}'");
                         }
 
                         if (compressedSize <= 0 || compressedSize > 10000000) // Sanity check (10MB max)
@@ -296,7 +289,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                             break;
                         }
 
-                        // Read compressed data
+                        // Read compressed data (starts immediately after size field)
                         byte[] compressedData = reader.ReadBytes(compressedSize);
 
                         // Decompress using bzip2
