@@ -536,7 +536,8 @@ namespace OhioNewsWeather.WeatherApp.Services
                 // Read and debug the raw bytes
                 long elevPos = reader.BaseStream.Position;
                 byte[] elevBytes = reader.ReadBytes(4);
-                float elevation = BitConverter.ToSingle(elevBytes.Reverse().ToArray(), 0);
+                Array.Reverse(elevBytes); // Reverse for big-endian
+                float elevation = BitConverter.ToSingle(elevBytes, 0);
 
                 if (debugThis)
                 {
