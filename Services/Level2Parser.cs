@@ -118,17 +118,22 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                 int messageCount = 0;
                 int validRadials = 0;
+                int loopIteration = 0;
+
+                System.Diagnostics.Debug.WriteLine("\n=== Checking message positions (first 10) ===");
 
                 // Parse messages
                 while (stream.Position + MESSAGE_SIZE <= stream.Length)
                 {
                     long messageStart = stream.Position;
+                    loopIteration++;
 
                     try
                     {
-                        if (messageCount < 3)
+                        // Log first 10 iterations to see what positions we're checking
+                        if (loopIteration <= 10)
                         {
-                            System.Diagnostics.Debug.WriteLine($"\nMessage {messageCount + 1} at position {messageStart}");
+                            System.Diagnostics.Debug.WriteLine($"\n[Iteration {loopIteration}] Position {messageStart}");
                             byte[] peek = new byte[20];
                             long saved = stream.Position;
                             stream.Read(peek, 0, 20);
@@ -145,7 +150,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                         Array.Reverse(ctmSizeBytes); // Big endian
                         int ctmSize = BitConverter.ToInt32(ctmSizeBytes, 0);
 
-                        if (messageCount < 3)
+                        if (loopIteration <= 10)
                         {
                             System.Diagnostics.Debug.WriteLine($"  CTM size: {ctmSize}");
                         }
@@ -165,7 +170,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                         byte messageType = msgHeaderBytes[15];
 
-                        if (messageCount < 3)
+                        if (loopIteration <= 10)
                         {
                             System.Diagnostics.Debug.WriteLine($"  Message type (byte 15): {messageType}");
                         }
@@ -173,6 +178,11 @@ namespace OhioNewsWeather.WeatherApp.Services
                         if (messageType == 31) // Digital Radar Data
                         {
                             messageCount++;
+
+                            if (messageCount <= 3)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"  *** FOUND MESSAGE TYPE 31 at iteration {loopIteration}, position {messageStart} ***");
+                            }
 
                             // Parse Message 31 starting from byte 12 of the record
                             stream.Position = messageStart + CTM_HEADER_SIZE;
