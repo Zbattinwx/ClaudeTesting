@@ -114,18 +114,22 @@ namespace OhioNewsWeather.WeatherApp.Services
                 stream.Position = ARCHIVE2_HEADER_SIZE;
 
                 // Check what's at position 24 (after volume header)
-                byte[] firstBytesAfterHeader = new byte[10];
-                stream.Read(firstBytesAfterHeader, 0, 10);
+                byte[] firstBytesAfterHeader = new byte[12];
+                stream.Read(firstBytesAfterHeader, 0, 12);
                 stream.Position = ARCHIVE2_HEADER_SIZE; // Reset
-                System.Diagnostics.Debug.Write($"First 10 bytes at position {ARCHIVE2_HEADER_SIZE}: ");
-                for (int i = 0; i < 10; i++) System.Diagnostics.Debug.Write($"{firstBytesAfterHeader[i]:X2} ");
+                System.Diagnostics.Debug.Write($"First 12 bytes at position {ARCHIVE2_HEADER_SIZE}: ");
+                for (int i = 0; i < 12; i++) System.Diagnostics.Debug.Write($"{firstBytesAfterHeader[i]:X2} ");
                 System.Diagnostics.Debug.WriteLine("");
 
-                // Check if this might be a compressed record (starts with BZ or other compression signature)
-                if (firstBytesAfterHeader[0] == 0x42 && firstBytesAfterHeader[1] == 0x5A)
+                // Check if this is LDM compressed format
+                // CTM header: 12 bytes (4 bytes size + 8 bytes other data)
+                // After CTM header, compressed data starts with "BZ" (0x42 0x5A)
+                bool hasCtmHeader = (firstBytesAfterHeader[4] == 0x42 && firstBytesAfterHeader[5] == 0x5A);
+
+                if (hasCtmHeader)
                 {
-                    System.Diagnostics.Debug.WriteLine("WARNING: Detected bzip2 compressed record at position 24!");
-                    System.Diagnostics.Debug.WriteLine("Files may have LDM compression structure - each record needs separate decompression");
+                    System.Diagnostics.Debug.WriteLine("Detected LDM/CTM compressed format - decompressing records...");
+                    return ParseLdmCompressedData(data);
                 }
 
                 // Track sweeps by elevation
@@ -134,7 +138,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                 int messageCount = 0;
                 int validRadials = 0;
 
-                System.Diagnostics.Debug.WriteLine("\n=== Parsing variable-length messages ===");
+                System.Diagnostics.Debug.WriteLine("\n=== Parsing uncompressed variable-length messages ===");
 
                 // Parse messages - they are variable length!
                 while (stream.Position + 16 < stream.Length) // Need at least 16 bytes for header
@@ -228,6 +232,187 @@ namespace OhioNewsWeather.WeatherApp.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Error in ParseArchive2Data: {ex.Message}\n{ex.StackTrace}");
+                return null;
+            }
+        }
+
+        private Level2Data ParseLdmCompressedData(byte[] data)
+        {
+            var level2Data = new Level2Data { Sweeps = new List<Level2Sweep>() };
+            var sweepsByElevation = new Dictionary<float, Level2Sweep>();
+
+            try
+            {
+                using var stream = new MemoryStream(data);
+                using var reader = new BinaryReader(stream);
+
+                // Skip volume header (24 bytes)
+                stream.Position = ARCHIVE2_HEADER_SIZE;
+
+                int recordNum = 0;
+                int totalMessages = 0;
+                int validRadials = 0;
+
+                System.Diagnostics.Debug.WriteLine("\n=== Processing LDM compressed records ===");
+
+                // Process each LDM compressed record
+                while (stream.Position + CTM_HEADER_SIZE < stream.Length)
+                {
+                    long recordStart = stream.Position;
+                    recordNum++;
+
+                    try
+                    {
+                        // Read CTM header (12 bytes)
+                        // Bytes 0-3: Size (big-endian signed int, negative means size in bytes including CTM header)
+                        byte[] sizeBytes = reader.ReadBytes(4);
+                        Array.Reverse(sizeBytes); // Convert to big-endian
+                        int recordSize = BitConverter.ToInt32(sizeBytes, 0);
+
+                        // Skip rest of CTM header (8 bytes)
+                        reader.ReadBytes(8);
+
+                        // Calculate compressed data size
+                        int compressedSize;
+                        if (recordSize < 0)
+                        {
+                            // Size includes CTM header
+                            compressedSize = -recordSize - CTM_HEADER_SIZE;
+                        }
+                        else
+                        {
+                            // Size is just the compressed data
+                            compressedSize = recordSize;
+                        }
+
+                        if (recordNum <= 3)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"\n[Record {recordNum}] Pos: {recordStart}, Compressed size: {compressedSize} bytes");
+                        }
+
+                        if (compressedSize <= 0 || compressedSize > 10000000) // Sanity check (10MB max)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"  Invalid compressed size: {compressedSize}, stopping");
+                            break;
+                        }
+
+                        // Read compressed data
+                        byte[] compressedData = reader.ReadBytes(compressedSize);
+
+                        // Decompress using bzip2
+                        byte[] decompressedData;
+                        try
+                        {
+                            using var compressedStream = new MemoryStream(compressedData);
+                            using var bzip2Stream = new BZip2Stream(compressedStream, SharpCompress.Compressors.CompressionMode.Decompress, false);
+                            using var decompressedStream = new MemoryStream();
+                            bzip2Stream.CopyTo(decompressedStream);
+                            decompressedData = decompressedStream.ToArray();
+
+                            if (recordNum <= 3)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"  Decompressed to {decompressedData.Length} bytes");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"  Failed to decompress record {recordNum}: {ex.Message}");
+                            continue;
+                        }
+
+                        // Parse messages from decompressed data
+                        using var msgStream = new MemoryStream(decompressedData);
+                        using var msgReader = new BigEndianBinaryReader(msgStream);
+
+                        int messagesInRecord = 0;
+
+                        while (msgStream.Position + 16 < msgStream.Length)
+                        {
+                            long messageStart = msgStream.Position;
+
+                            try
+                            {
+                                // Read message header (first 16 bytes)
+                                byte[] msgHeaderBytes = msgReader.ReadBytes(16);
+
+                                // Extract message size (bytes 12-13, in halfwords)
+                                ushort messageSizeHalfwords = (ushort)((msgHeaderBytes[12] << 8) | msgHeaderBytes[13]);
+                                int messageSizeBytes = messageSizeHalfwords * 2;
+
+                                byte messageType = msgHeaderBytes[15];
+
+                                if (messageType == 31) // Digital Radar Data
+                                {
+                                    totalMessages++;
+                                    messagesInRecord++;
+
+                                    if (totalMessages <= 3 && recordNum <= 3)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine($"    Message Type 31 at offset {messageStart}, size {messageSizeBytes} bytes");
+                                    }
+
+                                    // Parse Message 31 starting from beginning of this message
+                                    msgStream.Position = messageStart;
+                                    var radial = ParseMessage31Radial(msgReader, messageSizeBytes);
+
+                                    if (radial != null && radial.ReflectivityGates != null && radial.ReflectivityGates.Count > 0)
+                                    {
+                                        validRadials++;
+
+                                        // Group by elevation angle (rounded to 0.1 degree)
+                                        float elevKey = (float)Math.Round(radial.Elevation, 1);
+
+                                        if (!sweepsByElevation.ContainsKey(elevKey))
+                                        {
+                                            sweepsByElevation[elevKey] = new Level2Sweep
+                                            {
+                                                ElevationAngle = elevKey,
+                                                Radials = new List<Level2Radial>()
+                                            };
+                                        }
+
+                                        sweepsByElevation[elevKey].Radials.Add(radial);
+                                    }
+                                }
+
+                                // Move to next message
+                                msgStream.Position = messageStart + messageSizeBytes;
+                            }
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"    Error parsing message at offset {messageStart}: {ex.Message}");
+                                break;
+                            }
+                        }
+
+                        if (recordNum <= 3)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"  Found {messagesInRecord} Message 31 records in this LDM record");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Error processing LDM record {recordNum}: {ex.Message}");
+                        break;
+                    }
+                }
+
+                // Convert to list and sort by elevation
+                foreach (var kvp in sweepsByElevation)
+                {
+                    level2Data.Sweeps.Add(kvp.Value);
+                    System.Diagnostics.Debug.WriteLine($"Sweep at {kvp.Key:F1}° has {kvp.Value.Radials.Count} radials");
+                }
+
+                level2Data.Sweeps.Sort((a, b) => a.ElevationAngle.CompareTo(b.ElevationAngle));
+
+                System.Diagnostics.Debug.WriteLine($"\n=== Parse Complete: {recordNum} LDM records, {totalMessages} Message 31 radials, {validRadials} valid, {level2Data.Sweeps.Count} sweeps ===");
+
+                return level2Data.Sweeps.Count > 0 ? level2Data : null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in ParseLdmCompressedData: {ex.Message}\n{ex.StackTrace}");
                 return null;
             }
         }
