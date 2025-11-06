@@ -215,6 +215,25 @@ namespace OhioNewsWeather.WeatherApp.Services
             {
                 bool debugThis = _debugRadialCount < 3;
                 _debugRadialCount++;
+
+                if (debugThis)
+                {
+                    System.Diagnostics.Debug.WriteLine($"\n  === Parsing radial #{_debugRadialCount} at position {msgStart} ===");
+
+                    // Dump first 80 bytes for diagnosis
+                    long savedPos = reader.BaseStream.Position;
+                    byte[] debugBytes = reader.ReadBytes(Math.Min(80, (int)(reader.BaseStream.Length - reader.BaseStream.Position)));
+                    reader.BaseStream.Position = savedPos;
+
+                    System.Diagnostics.Debug.Write($"  Bytes: ");
+                    for (int i = 0; i < Math.Min(80, debugBytes.Length); i++)
+                    {
+                        System.Diagnostics.Debug.Write($"{debugBytes[i]:X2} ");
+                        if ((i + 1) % 20 == 0) System.Diagnostics.Debug.Write("\n         ");
+                    }
+                    System.Diagnostics.Debug.WriteLine("");
+                }
+
                 // Message 31 Header (100 bytes total)
                 // Bytes 0-11: RDA status header
                 reader.ReadBytes(12); // Skip RDA status
@@ -256,6 +275,12 @@ namespace OhioNewsWeather.WeatherApp.Services
                 // Bytes 40-41: Elevation angle (hundredths of degrees)
                 ushort elevationRaw = reader.ReadUInt16();
                 float elevation = elevationRaw * 0.01f;
+
+                if (debugThis)
+                {
+                    System.Diagnostics.Debug.WriteLine($"  Azimuth raw: {azimuthRaw} = {azimuth:F2}° (at byte 36-37)");
+                    System.Diagnostics.Debug.WriteLine($"  Elevation raw: {elevationRaw} = {elevation:F2}° (at byte 40-41)");
+                }
 
                 // Bytes 42: Elevation number
                 byte elevationNumber = reader.ReadByte();
