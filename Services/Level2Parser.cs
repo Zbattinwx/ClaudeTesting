@@ -172,7 +172,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                             // Parse Message 31 starting from beginning of this message
                             stream.Position = messageStart;
-                            var radial = ParseMessage31Radial(reader);
+                            var radial = ParseMessage31Radial(reader, messageSizeBytes);
 
                             if (radial != null && radial.ReflectivityGates != null && radial.ReflectivityGates.Count > 0)
                             {
@@ -234,7 +234,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
         private static int _debugRadialCount = 0;
 
-        private Level2Radial ParseMessage31Radial(BigEndianBinaryReader reader)
+        private Level2Radial ParseMessage31Radial(BigEndianBinaryReader reader, int messageSize = 0)
         {
             long msgStart = reader.BaseStream.Position;
 
@@ -245,7 +245,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                 if (debugThis)
                 {
-                    System.Diagnostics.Debug.WriteLine($"\n  === Parsing radial #{_debugRadialCount} at position {msgStart} ===");
+                    System.Diagnostics.Debug.WriteLine($"\n  === Parsing radial #{_debugRadialCount} at position {msgStart}, message size {messageSize} bytes ===");
 
                     // Dump first 80 bytes for diagnosis
                     long savedPos = reader.BaseStream.Position;
@@ -370,7 +370,10 @@ namespace OhioNewsWeather.WeatherApp.Services
                 }
 
                 // Parse data blocks
-                if (refPointer > 0 && refPointer < MESSAGE_SIZE)
+                // Use messageSize for validation if provided, otherwise use a large value
+                int maxPointer = messageSize > 0 ? messageSize : 100000;
+
+                if (refPointer > 0 && refPointer < maxPointer)
                 {
                     reader.BaseStream.Position = msgStart + refPointer;
                     ParseDataBlock(reader, radial.ReflectivityGates, debugThis);
@@ -380,10 +383,10 @@ namespace OhioNewsWeather.WeatherApp.Services
                 }
                 else if (debugThis)
                 {
-                    System.Diagnostics.Debug.WriteLine($"  Invalid ref pointer: {refPointer}");
+                    System.Diagnostics.Debug.WriteLine($"  Invalid ref pointer: {refPointer} (max: {maxPointer})");
                 }
 
-                if (velPointer > 0 && velPointer < MESSAGE_SIZE)
+                if (velPointer > 0 && velPointer < maxPointer)
                 {
                     reader.BaseStream.Position = msgStart + velPointer;
                     ParseDataBlock(reader, radial.VelocityGates);
