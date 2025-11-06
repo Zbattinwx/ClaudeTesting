@@ -327,11 +327,10 @@ namespace OhioNewsWeather.WeatherApp.Services
                         }
 
                         // Parse messages at fixed 2432-byte intervals
-                        // Each slot has a 12-byte CTM header followed by the actual message
+                        // Messages start directly at each slot boundary (no CTM header in decompressed data)
                         for (int msgNum = 0; msgNum < maxMessages; msgNum++)
                         {
-                            long slotStart = msgNum * MESSAGE_SIZE;
-                            long messageStart = slotStart + CTM_HEADER_SIZE; // Skip 12-byte CTM header
+                            long messageStart = msgNum * MESSAGE_SIZE;
                             msgStream.Position = messageStart;
 
                             try
@@ -340,7 +339,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                                 if (msgStream.Position + 16 > msgStream.Length)
                                     break;
 
-                                // Read message header (first 16 bytes of actual message, after CTM header)
+                                // Read message header (first 16 bytes)
                                 byte[] msgHeaderBytes = msgReader.ReadBytes(16);
 
                                 // Extract message size (bytes 12-13, in halfwords)
@@ -356,7 +355,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                                 // Log first few messages of first few records
                                 if (recordNum <= 2 && messagesInRecord < 5)
                                 {
-                                    System.Diagnostics.Debug.WriteLine($"    Msg slot {msgNum}: Type={messageType}, Size={messageSizeBytes} bytes (at offset {messageStart})");
+                                    System.Diagnostics.Debug.WriteLine($"    Msg slot {msgNum}: Type={messageType}, Size={messageSizeBytes} bytes");
                                 }
 
                                 if (messageType == 31) // Digital Radar Data
@@ -369,7 +368,7 @@ namespace OhioNewsWeather.WeatherApp.Services
                                         System.Diagnostics.Debug.WriteLine($"    *** Message Type 31 at slot {msgNum}, offset {messageStart}, size {messageSizeBytes} bytes ***");
                                     }
 
-                                    // Parse Message 31 starting from actual message (after CTM header)
+                                    // Parse Message 31 starting from beginning of message
                                     msgStream.Position = messageStart;
                                     var radial = ParseMessage31Radial(msgReader, messageSizeBytes);
 
