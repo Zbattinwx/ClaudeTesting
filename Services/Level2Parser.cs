@@ -314,20 +314,30 @@ namespace OhioNewsWeather.WeatherApp.Services
                         }
 
                         // Parse messages from decompressed data
+                        // IMPORTANT: Messages in decompressed LDM data are at FIXED 2432-byte intervals
                         using var msgStream = new MemoryStream(decompressedData);
                         using var msgReader = new BigEndianBinaryReader(msgStream);
 
                         int messagesInRecord = 0;
-                        int maxIterations = 1000; // Safety limit
-                        int iterations = 0;
+                        int maxMessages = decompressedData.Length / MESSAGE_SIZE;
 
-                        while (msgStream.Position + 16 < msgStream.Length && iterations < maxIterations)
+                        if (recordNum <= 2)
                         {
-                            long messageStart = msgStream.Position;
-                            iterations++;
+                            System.Diagnostics.Debug.WriteLine($"  Decompressed record can hold {maxMessages} messages at 2432-byte intervals");
+                        }
+
+                        // Parse messages at fixed 2432-byte intervals
+                        for (int msgNum = 0; msgNum < maxMessages; msgNum++)
+                        {
+                            long messageStart = msgNum * MESSAGE_SIZE;
+                            msgStream.Position = messageStart;
 
                             try
                             {
+                                // Check if we have enough data for a message header
+                                if (msgStream.Position + 16 > msgStream.Length)
+                                    break;
+
                                 // Read message header (first 16 bytes)
                                 byte[] msgHeaderBytes = msgReader.ReadBytes(16);
 
@@ -337,20 +347,14 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                                 byte messageType = msgHeaderBytes[15];
 
-                                // Log first few messages of first few records to see what we're finding
+                                // Skip empty slots (message type 0 or size 0)
+                                if (messageType == 0 || messageSizeBytes == 0)
+                                    continue;
+
+                                // Log first few messages of first few records
                                 if (recordNum <= 2 && messagesInRecord < 5)
                                 {
-                                    System.Diagnostics.Debug.WriteLine($"    Msg {messagesInRecord + 1} at offset {messageStart}: Type={messageType}, Size={messageSizeBytes} bytes");
-                                }
-
-                                // Validate message size
-                                if (messageSizeBytes <= 0 || messageSizeBytes > decompressedData.Length)
-                                {
-                                    if (recordNum <= 2)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine($"    Invalid message size {messageSizeBytes}, stopping record parse");
-                                    }
-                                    break;
+                                    System.Diagnostics.Debug.WriteLine($"    Msg slot {msgNum}: Type={messageType}, Size={messageSizeBytes} bytes");
                                 }
 
                                 if (messageType == 31) // Digital Radar Data
@@ -360,7 +364,7 @@ namespace OhioNewsWeather.WeatherApp.Services
 
                                     if (totalMessages <= 3 && recordNum <= 3)
                                     {
-                                        System.Diagnostics.Debug.WriteLine($"    *** Message Type 31 at offset {messageStart}, size {messageSizeBytes} bytes ***");
+                                        System.Diagnostics.Debug.WriteLine($"    *** Message Type 31 at slot {msgNum}, offset {messageStart}, size {messageSizeBytes} bytes ***");
                                     }
 
                                     // Parse Message 31 starting from beginning of this message
@@ -386,34 +390,18 @@ namespace OhioNewsWeather.WeatherApp.Services
                                         sweepsByElevation[elevKey].Radials.Add(radial);
                                     }
                                 }
-
-                                // Move to next message
-                                long nextMessagePos = messageStart + messageSizeBytes;
-
-                                // Sanity check - make sure we're advancing
-                                if (nextMessagePos <= messageStart)
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"    ERROR: Next position {nextMessagePos} <= current {messageStart}, breaking to prevent infinite loop");
-                                    break;
-                                }
-
-                                msgStream.Position = nextMessagePos;
+                                // Could also handle other message types here (2, 3, 5, 13, 15, 18)
                             }
                             catch (Exception ex)
                             {
-                                System.Diagnostics.Debug.WriteLine($"    Error parsing message at offset {messageStart}: {ex.Message}");
-                                break;
+                                System.Diagnostics.Debug.WriteLine($"    Error parsing message at slot {msgNum}, offset {messageStart}: {ex.Message}");
+                                // Continue to next message slot instead of breaking
                             }
-                        }
-
-                        if (iterations >= maxIterations)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"  WARNING: Hit max iterations ({maxIterations}) for record {recordNum}");
                         }
 
                         if (recordNum <= 3)
                         {
-                            System.Diagnostics.Debug.WriteLine($"  Processed {iterations} messages, found {messagesInRecord} Message 31 records in this LDM record");
+                            System.Diagnostics.Debug.WriteLine($"  Scanned {maxMessages} message slots, found {messagesInRecord} Message 31 records");
                         }
                     }
                     catch (Exception ex)
